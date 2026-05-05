@@ -1,28 +1,41 @@
-# CENCORE Operations Console
+# Cencore Operations Console
 
-Sistema de gestión industrial para logística de precisión, especializado en empaque estructural.
+Sistema avanzado de gestión logística y cotización industrial para **Cencore SAS**. Esta plataforma permite la gestión de clientes, productos y la generación de cotizaciones multi-ítem con cálculos automáticos basados en reglas comerciales.
 
-## Características
-- **Gestión de Clientes**: CRUD completo de base de datos de clientes.
-- **Catálogo de Productos**: Gestión de inventario y especificaciones técnicas.
-- **Motor de Cotización**: Generación de cotizaciones multi-producto con cálculos automáticos en COP.
-- **Configuración Comercial**: Reglas de negocio dinámicas para recargos y descuentos.
+## Tecnologías
 
-## Requisitos
-- Node.js 18+
-- Supabase Project (PostgreSQL + Auth + Storage)
-- PRICING_SERVICE (FastAPI microservice)
+- **Framework:** Next.js (App Router)
+- **Base de Datos & Auth:** Supabase
+- **Estilos:** Tailwind CSS 4
+- **Diseño:** Estética industrial "Stitch" de alta fidelidad
+
+## Configuración del Entorno
+
+Para ejecutar el proyecto localmente o desplegarlo en producción (Vercel), es necesario configurar las siguientes variables de entorno:
+
+```env
+NEXT_PUBLIC_SUPABASE_URL=tu-url-de-supabase
+NEXT_PUBLIC_SUPABASE_ANON_KEY=tu-anon-key-de-supabase
+PRICING_SERVICE_URL=url-del-microservicio-de-precios
+```
 
 ## Despliegue en Vercel
-1. Clonar el repositorio.
-2. Configurar variables de entorno:
-   - `NEXT_PUBLIC_SUPABASE_URL`
-   - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
-   - `PRICING_SERVICE_URL`
-3. Ejecutar `npm run build`.
 
-## Stack Tecnológico
-- **Frontend**: Next.js 16 (App Router)
-- **Estilos**: Tailwind CSS 4
-- **Base de Datos**: Supabase
-- **Icons**: Lucide React
+1. **Conectar Repositorio:** Conecte este repositorio a su proyecto en Vercel.
+2. **Variables de Entorno:** Configure las variables mencionadas arriba en la sección "Environment Variables" de Vercel.
+3. **Build:** Vercel detectará automáticamente Next.js y ejecutará `npm run build`.
+
+## Seguridad (Supabase)
+
+**IMPORTANTE:** Antes de pasar a producción, asegúrese de:
+1. Habilitar **Row Level Security (RLS)** en todas las tablas de Supabase.
+2. Configurar las políticas de acceso para restringir la edición de configuraciones comerciales solo a administradores.
+
+## Estructura del Proyecto
+
+- `actions/`: Acciones de servidor para mutaciones de datos.
+- `app/admin/`: Panel de administración industrial.
+- `components/`: Componentes de interfaz reutilizables.
+- `repositories/`: Capa de abstracción de base de datos.
+- `services/`: Lógica de negocio y servicios externos.
+- `types/`: Definiciones de TypeScript.

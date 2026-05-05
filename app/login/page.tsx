@@ -1,66 +1,118 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowRight, Lock, Mail } from "lucide-react";
+import { Lock, User } from "lucide-react";
 
 export default function LoginPage() {
   const router = useRouter();
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-    // Simulating login for demo purposes
-    setTimeout(() => {
-      router.push("/admin");
-    }, 1000);
+    // Simulated login delay
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    router.push("/admin");
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
-      <div className="max-w-md w-full space-y-8 bg-white p-10 rounded-2xl shadow-xl border border-gray-100">
-        <div>
-          <h2 className="text-center text-3xl font-extrabold text-gray-900 tracking-tight">
+    <div className="min-h-screen flex">
+      {/* Left: Dark branding panel */}
+      <div className="hidden lg:flex lg:w-1/2 bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 text-white flex-col justify-center items-center p-12">
+        <div className="max-w-md text-center">
+          <h1 className="text-4xl font-bold tracking-wide mb-4">
             CENCORE<span className="text-[#F97316]">.</span>
-          </h2>
-          <p className="mt-2 text-center text-sm text-gray-600">
-            Ingresa a la Consola de Operaciones
-          </p>
+          </h1>
+          <p className="text-lg text-gray-400 mb-2">Logística Industrial</p>
+          <div className="mt-8 w-24 h-1 bg-[#F97316] mx-auto rounded-full" />
         </div>
-        <form className="mt-8 space-y-6" onSubmit={handleLogin}>
-          <div className="rounded-md shadow-sm -space-y-px">
-            <div className="relative">
-              <Mail className="absolute left-3 top-3 h-5 w-5 text-gray-400" />
-              <input
-                type="email"
-                required
-                className="appearance-none rounded-none relative block w-full px-10 py-3 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-t-md focus:outline-none focus:ring-[#F97316] focus:border-[#F97316] sm:text-sm"
-                placeholder="Email corporativo"
-              />
-            </div>
-            <div className="relative">
-              <Lock className="absolute left-3 top-3 h-5 w-5 text-gray-400" />
-              <input
-                type="password"
-                required
-                className="appearance-none rounded-none relative block w-full px-10 py-3 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-b-md focus:outline-none focus:ring-[#F97316] focus:border-[#F97316] sm:text-sm"
-                placeholder="Contraseña"
-              />
-            </div>
+      </div>
+
+      {/* Right: Login form */}
+      <div className="flex-1 flex flex-col justify-center items-center px-4 sm:px-6 lg:px-20 xl:px-24 bg-[#F7F9FB]">
+        <div className="w-full max-w-sm">
+          <div className="lg:hidden mb-8 text-center">
+            <span className="text-2xl font-bold text-gray-900 tracking-wide">
+              CENCORE<span className="text-[#F97316]">.</span>
+            </span>
+            <p className="text-sm text-gray-500 mt-1">Logística Industrial</p>
           </div>
 
-          <div>
+          <h2 className="text-2xl font-semibold text-gray-900 mb-2">Bienvenido</h2>
+          <p className="text-sm text-gray-500 mb-8">Ingrese sus credenciales corporativas para continuar.</p>
+
+          <form onSubmit={handleLogin} className="space-y-5">
+            <div>
+              <label htmlFor="email" className="block text-sm font-medium text-gray-700">Correo Corporativo</label>
+              <div className="mt-1 relative">
+                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                  <User className="h-5 w-5 text-gray-400" />
+                </div>
+                <input
+                  id="email"
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  required
+                  className="block w-full pl-10 pr-3 py-2.5 border border-gray-300 rounded-md bg-white text-sm placeholder-gray-400 focus:outline-none focus:ring-[#F97316] focus:border-[#F97316] transition-colors"
+                  placeholder="usuario@cencore.co"
+                />
+              </div>
+            </div>
+            <div>
+              <label htmlFor="password" className="block text-sm font-medium text-gray-700">Contraseña</label>
+              <div className="mt-1 relative">
+                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                  <Lock className="h-5 w-5 text-gray-400" />
+                </div>
+                <input
+                  id="password"
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  required
+                  className="block w-full pl-10 pr-3 py-2.5 border border-gray-300 rounded-md bg-white text-sm placeholder-gray-400 focus:outline-none focus:ring-[#F97316] focus:border-[#F97316] transition-colors"
+                  placeholder="••••••••"
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between">
+              <div />
+              <Link href="#" className="text-sm font-medium text-[#F97316] hover:text-[#EA580C]">
+                ¿Olvidó su contraseña?
+              </Link>
+            </div>
+
             <button
               type="submit"
               disabled={loading}
-              className="group relative w-full flex justify-center py-3 px-4 border border-transparent text-sm font-bold rounded-md text-white bg-gray-900 hover:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500 transition-colors"
+              className="w-full flex justify-center py-2.5 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-[#F97316] hover:bg-[#EA580C] focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[#F97316] disabled:opacity-50 transition-colors"
             >
-              {loading ? "Iniciando sesión..." : "ACCEDER AL PANEL"}
-              {!loading && <ArrowRight className="ml-2 h-5 w-5" />}
+              {loading ? "Ingresando..." : "Ingresar al Panel"}
             </button>
+          </form>
+
+          <p className="mt-4 text-xs text-gray-400 text-center">
+            Redirigiendo al Panel de Control tras el ingreso
+          </p>
+          <p className="mt-6 text-xs text-gray-400 text-center">
+            ¿Problemas de acceso?{" "}
+            <Link href="/contact" className="text-[#F97316] hover:text-[#EA580C]">Contactar soporte técnico</Link>
+          </p>
+        </div>
+
+        <div className="mt-12 text-center text-xs text-gray-400">
+          <p>© 2024 CENCORE SAS • SISTEMA DE GESTIÓN LOGÍSTICA</p>
+          <div className="flex justify-center space-x-4 mt-2">
+            <Link href="#" className="hover:text-gray-600">POLÍTICA DE PRIVACIDAD</Link>
+            <Link href="#" className="hover:text-gray-600">TÉRMINOS DE SERVICIO</Link>
           </div>
-        </form>
+        </div>
       </div>
     </div>
   );

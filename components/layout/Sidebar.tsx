@@ -2,11 +2,13 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, Users, Package, FileText, Settings, LogOut, DollarSign } from "lucide-react";
+import { LayoutDashboard, Users, Package, FileText, Settings, LogOut, DollarSign, Calculator, Factory } from "lucide-react";
 
 const navigation = [
   { name: "Dashboard", href: "/admin", icon: LayoutDashboard },
   { name: "Cotizaciones", href: "/admin/quotes", icon: FileText },
+  { name: "Cotizador Rápido", href: "/admin/cotizador-rapido", icon: Calculator },
+  { name: "Motor de Costos", href: "/admin/costs", icon: Factory },
   { name: "Configuración Comercial", href: "/admin/products/commercial", icon: DollarSign },
   { name: "Clientes", href: "/admin/clients", icon: Users },
   { name: "Productos", href: "/admin/products", icon: Package },

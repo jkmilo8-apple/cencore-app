@@ -57,6 +57,7 @@ export default function QuotesPage() {
         </Link>
       </div>
 
+      {/* Filters */}
       <div className="bg-white shadow rounded-lg border border-gray-100 p-4">
         <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
           <div className="relative">
@@ -88,19 +89,24 @@ export default function QuotesPage() {
             value={dateFrom}
             onChange={(e) => setDateFrom(e.target.value)}
             className="block w-full text-sm border border-gray-300 rounded-md py-2 px-3 focus:ring-[#F97316] focus:border-[#F97316]"
+            placeholder="Desde"
           />
           <input
             type="date"
             value={dateTo}
             onChange={(e) => setDateTo(e.target.value)}
             className="block w-full text-sm border border-gray-300 rounded-md py-2 px-3 focus:ring-[#F97316] focus:border-[#F97316]"
+            placeholder="Hasta"
           />
         </div>
       </div>
 
+      {/* Table */}
       <div className="bg-white shadow rounded-lg border border-gray-100">
         {loading ? (
           <div className="p-8 text-center text-gray-500">Cargando cotizaciones...</div>
+        ) : quotes.length === 0 ? (
+          <div className="p-8 text-center text-gray-500">No se encontraron cotizaciones.</div>
         ) : (
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-100">
@@ -111,7 +117,7 @@ export default function QuotesPage() {
                   <th className="px-6 py-4 text-left text-xs font-bold text-gray-500 uppercase tracking-widest">Estado de Gestión</th>
                   <th className="px-6 py-4 text-right text-xs font-bold text-gray-500 uppercase tracking-widest">Valor Total</th>
                   <th className="px-6 py-4 text-left text-xs font-bold text-gray-500 uppercase tracking-widest">Emisión</th>
-                  <th className="relative px-6 py-4"></th>
+                  <th className="relative px-6 py-4"><span className="sr-only">Acciones</span></th>
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-50">
@@ -120,30 +126,40 @@ export default function QuotesPage() {
                   const clientName = (quote.clients as any)?.name || "—";
                   return (
                     <tr key={quote.id} className="hover:bg-orange-50/30 transition-colors group">
-                      <td className="px-6 py-4 whitespace-nowrap font-bold text-gray-900 group-hover:text-[#F97316]">
-                        #{quote.quote_number || quote.id.slice(0, 8).toUpperCase()}
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="text-sm font-bold text-gray-900 group-hover:text-[#F97316] transition-colors">
+                          #{quote.quote_number || quote.id.slice(0, 8).toUpperCase()}
+                        </div>
+                        {quote.urgent_delivery && (
+                          <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-red-100 text-red-700 uppercase mt-1">
+                            Urgente
+                          </span>
+                        )}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600 font-medium">{clientName}</td>
                       <td className="px-6 py-4 whitespace-nowrap">
-                        <select
-                          value={quote.status}
-                          onChange={(e) => handleStatusChange(quote.id, e.target.value)}
-                          className={`text-[11px] font-bold uppercase px-3 py-1 rounded-full border-0 ${st.style} cursor-pointer focus:ring-2 focus:ring-[#F97316] outline-none`}
-                        >
-                          <option value="draft">Borrador</option>
-                          <option value="review">En Revisión</option>
-                          <option value="approved">Aprobada</option>
-                          <option value="rejected">Rechazada</option>
-                        </select>
+                        <div className="relative inline-block">
+                          <select
+                            value={quote.status}
+                            onChange={(e) => handleStatusChange(quote.id, e.target.value)}
+                            className={`text-[11px] font-bold uppercase tracking-tight px-3 py-1 rounded-full border-0 ${st.style} cursor-pointer focus:ring-2 focus:ring-[#F97316] outline-none appearance-none pr-6`}
+                          >
+                            <option value="draft">Borrador</option>
+                            <option value="review">En Revisión</option>
+                            <option value="approved">Aprobada</option>
+                            <option value="rejected">Rechazada</option>
+                          </select>
+                          <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 h-3 w-3 opacity-50 pointer-events-none" />
+                        </div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm font-bold text-gray-900 text-right">
                         {formatCurrency(quote.total_amount)}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-400">
-                        {new Date(quote.created_at).toLocaleDateString("es-CO")}
+                        {new Date(quote.created_at).toLocaleDateString("es-CO", { day: '2-digit', month: 'short', year: 'numeric' })}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                        <Link href={`/admin/quotes/${quote.id}`} className="text-gray-400 hover:text-[#F97316]">
+                        <Link href={`/admin/quotes/${quote.id}`} className="text-gray-400 hover:text-[#F97316] transition-colors p-2 hover:bg-white rounded-lg shadow-sm border border-transparent hover:border-gray-100">
                           <Eye className="h-5 w-5" />
                         </Link>
                       </td>

@@ -159,3 +159,42 @@ export async function updateQuoteStatusAction(id: string, status: string) {
 
   return { data: data as Quote, error: null };
 }
+
+// ─── CALCULATE PRICING (via FastAPI) ──────────────────────────────
+export async function calculatePricingAction(pricingData: {
+  category: string;
+  material: string;
+  dimensions: {
+    length?: number;
+    width?: number;
+    height?: number;
+    diameter?: number;
+    thickness?: number;
+    wing_1?: number;
+    wing_2?: number;
+  };
+  quantity: number;
+}) {
+  const serviceUrl = process.env.PRICING_SERVICE_URL || "http://localhost:8000";
+  
+  try {
+    const response = await fetch(`${serviceUrl}/calculate`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(pricingData),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Pricing service error: ${errorText}`);
+    }
+
+    const result = await response.json();
+    return { data: result, error: null };
+  } catch (error: any) {
+    console.error("Error calculating pricing:", error);
+    return { data: null, error: error.message };
+  }
+}

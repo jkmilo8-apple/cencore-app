@@ -55,6 +55,7 @@ export default async function DashboardPage() {
         <p className="mt-2 text-sm text-gray-700">Resumen operativo del sistema de cotizaciones Cencore.</p>
       </div>
 
+      {/* KPI Cards */}
       <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4">
         {kpis.map((kpi) => (
           <div key={kpi.label} className="bg-white overflow-hidden shadow rounded-lg border border-gray-100">
@@ -75,7 +76,9 @@ export default async function DashboardPage() {
         ))}
       </div>
 
+      {/* Recent Quotes + Top Clients */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Recent Quotes */}
         <div className="lg:col-span-2 bg-white shadow rounded-lg border border-gray-100">
           <div className="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
             <h2 className="text-lg font-medium text-gray-900">Cotizaciones Recientes</h2>
@@ -94,7 +97,7 @@ export default async function DashboardPage() {
               <tbody className="bg-white divide-y divide-gray-200">
                 {data.recentQuotes.map((quote) => {
                   const st = statusLabels[quote.status as keyof typeof statusLabels] || statusLabels["draft"];
-                  const clientObj = quote.clients as any;
+                  const clientObj = quote.clients as { name: string } | null;
                   return (
                     <tr key={quote.id} className="hover:bg-gray-50">
                       <td className="px-6 py-4 text-sm font-medium text-[#F97316]">
@@ -110,10 +113,15 @@ export default async function DashboardPage() {
                     </tr>
                   );
                 })}
+                {data.recentQuotes.length === 0 && (
+                  <tr><td colSpan={4} className="px-6 py-8 text-center text-sm text-gray-500">Sin cotizaciones aún.</td></tr>
+                )}
               </tbody>
             </table>
           </div>
         </div>
+
+        {/* Top Clients */}
         <div className="bg-white shadow rounded-lg border border-gray-100">
           <div className="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
             <h2 className="text-lg font-medium text-gray-900">Clientes</h2>
@@ -127,9 +135,15 @@ export default async function DashboardPage() {
                 </div>
                 <div className="ml-3">
                   <p className="text-sm font-medium text-gray-900">{client.name}</p>
+                  <p className={`text-xs ${client.status === "active" ? "text-green-600" : "text-gray-400"}`}>
+                    {client.status === "active" ? "Activo" : "Inactivo"}
+                  </p>
                 </div>
               </li>
             ))}
+            {data.topClients.length === 0 && (
+              <li className="px-6 py-8 text-center text-sm text-gray-500">Sin clientes aún.</li>
+            )}
           </ul>
         </div>
       </div>
