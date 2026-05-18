@@ -266,11 +266,41 @@ export default function QuoteDetailPage() {
                         <td className="px-6 py-4 text-sm text-gray-400">{idx + 1}</td>
                         <td className="px-6 py-4">
                           <p className="text-sm font-medium text-gray-900">{description}</p>
-                          {item.configuration && (
-                            <p className="text-xs text-gray-400 mt-0.5">
-                              {item.configuration?.dimensions && `Ø${item.configuration.dimensions.diameter}×${item.configuration.dimensions.length}cm`}
-                            </p>
-                          )}
+                          {item.configuration && (() => {
+                            const conf = item.configuration;
+                            const dims = conf.dimensions || {};
+                            const line = conf.product_line;
+                            if (line === "Corrugado") {
+                              return (
+                                <p className="text-xs text-gray-400 mt-0.5">
+                                  Caja: {dims.length_mm || 0}×{dims.width_mm || 0}×{dims.height_mm || 0} mm
+                                </p>
+                              );
+                            }
+                            if (line === "Esquineros") {
+                              return (
+                                <p className="text-xs text-gray-400 mt-0.5">
+                                  Esquinero: {dims.length_mm || 0}×{dims.wing_1_mm || 0}×{dims.thickness_mm || 0} mm
+                                </p>
+                              );
+                            }
+                            if (line === "Tubos" || line === "Envases") {
+                              return (
+                                <p className="text-xs text-gray-400 mt-0.5">
+                                  {line}: Ø{dims.diameter_mm || 0}×{dims.length_mm || 0} mm (Pared {dims.thickness_mm || 0} mm)
+                                </p>
+                              );
+                            }
+                            // Fallback to legacy
+                            if (dims.diameter !== undefined || dims.length !== undefined) {
+                              return (
+                                <p className="text-xs text-gray-400 mt-0.5">
+                                  Ø{dims.diameter}×{dims.length}cm
+                                </p>
+                              );
+                            }
+                            return null;
+                          })()}
                         </td>
                         <td className="px-6 py-4 text-sm text-gray-900 text-right">{Number(item.quantity).toLocaleString("es-CO")} u.</td>
                         <td className="px-6 py-4 text-sm text-gray-900 text-right">{formatCurrency(Number(item.unit_price))}</td>

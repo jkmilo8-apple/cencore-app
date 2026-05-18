@@ -188,6 +188,12 @@ export async function createIndirectCost(costData: any) {
   if (!error) revalidatePath("/admin/costs");
   return { error: error?.message };
 }
+export async function updateIndirectCost(id: string, updates: any) {
+  const supabase = await createClient();
+  const { error } = await supabase.from("pricing_indirect_costs").update({ ...updates, updated_at: new Date().toISOString() }).eq("id", id);
+  if (!error) revalidatePath("/admin/costs");
+  return { error: error?.message };
+}
 
 export async function getBusinessLines() {
   const supabase = await createClient();

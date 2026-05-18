@@ -10,7 +10,7 @@ import {
   getLaborRoutes, createLaborRoute, updateLaborRoute,
   getVehicles, updateVehicle, createVehicle,
   getLaborProvisions, updateLaborProvision,
-  getIndirectCosts, createIndirectCost,
+  getIndirectCosts, createIndirectCost, updateIndirectCost,
   getBusinessLines, updateBusinessLine, createBusinessLine
 } from "@/actions/pricing_config";
 
@@ -42,7 +42,13 @@ export default function PricingAdminPage() {
   const [newVehicle, setNewVehicle] = useState({ vehicle_type: "", cubic_capacity: 0, freight_cost: 0, dimensions: "" });
 
   const [showNewIndirect, setShowNewIndirect] = useState(false);
-  const [newIndirect, setNewIndirect] = useState({ item_name: "", cost_type: "fixed", amount: 0 });
+  const [newIndirect, setNewIndirect] = useState({ 
+    item_name: "", 
+    cost_type: "fixed", 
+    amount: 0,
+    start_date: new Date().toISOString().split("T")[0],
+    end_date: ""
+  });
 
   const [showNewBL, setShowNewBL] = useState(false);
   const [newBL, setNewBL] = useState({ name: "", code: "", description: "" });
@@ -117,12 +123,22 @@ export default function PricingAdminPage() {
 
   const handleCreateIndirect = async () => {
     setSaving("new_ind");
-    const { error } = await createIndirectCost(newIndirect);
+    const payload = {
+      ...newIndirect,
+      end_date: newIndirect.end_date || null
+    };
+    const { error } = await createIndirectCost(payload);
     if (error) setMessage({ type: "error", text: error });
     else {
       setMessage({ type: "success", text: "Costo NIF/CIF creado" });
       setShowNewIndirect(false);
-      setNewIndirect({ item_name: "", cost_type: "fixed", amount: 0 });
+      setNewIndirect({ 
+        item_name: "", 
+        cost_type: "fixed", 
+        amount: 0,
+        start_date: new Date().toISOString().split("T")[0],
+        end_date: ""
+      });
       loadAllData();
     }
     setTimeout(() => setMessage(null), 3000);
@@ -422,7 +438,7 @@ export default function PricingAdminPage() {
                     {showNewIndirect && (
                       <div className="flex flex-wrap justify-between items-end gap-3 p-4 bg-orange-50 rounded-xl border border-orange-200">
                         <div className="flex flex-col space-y-2">
-                          <input type="text" placeholder="Nombre (Ej. Arriendo)" value={newIndirect.item_name} onChange={e => setNewIndirect({...newIndirect, item_name: e.target.value})} className="p-2 border rounded text-sm text-black w-48" />
+                          <input type="text" placeholder="Nombre (Ej. Arriendo)" value={newIndirect.item_name} onChange={e => setNewIndirect({...newIndirect, item_name: e.target.value})} className="p-2 border rounded text-sm text-black w-48 bg-white" />
                           <div className="flex space-x-2">
                             <select value={newIndirect.cost_type} onChange={e => setNewIndirect({...newIndirect, cost_type: e.target.value as "fixed"|"variable"})} className="w-32 p-2 border rounded text-sm text-black bg-white">
                               <option value="fixed">Fijo</option>
@@ -430,35 +446,95 @@ export default function PricingAdminPage() {
                             </select>
                           </div>
                         </div>
+                        <div className="flex flex-col space-y-1">
+                          <span className="text-[10px] font-bold text-orange-600 uppercase">Vigencia Inicio</span>
+                          <input type="date" value={newIndirect.start_date} onChange={e => setNewIndirect({...newIndirect, start_date: e.target.value})} className="p-2 border rounded text-sm text-black w-36 bg-white" />
+                        </div>
+                        <div className="flex flex-col space-y-1">
+                          <span className="text-[10px] font-bold text-orange-600 uppercase">Vigencia Fin (Opcional)</span>
+                          <input type="date" value={newIndirect.end_date} onChange={e => setNewIndirect({...newIndirect, end_date: e.target.value})} className="p-2 border rounded text-sm text-black w-36 bg-white" />
+                        </div>
                         <div className="flex items-center space-x-3">
                           <div className="text-right">
                             <p className="text-[10px] font-bold text-orange-600 uppercase">Monto Mensual</p>
-                            <input type="number" value={newIndirect.amount} onChange={e => setNewIndirect({...newIndirect, amount: parseFloat(e.target.value)})} className="w-32 p-2 border rounded-lg text-sm font-bold text-right text-black bg-white" />
+                            <input type="number" value={newIndirect.amount} onChange={e => setNewIndirect({...newIndirect, amount: parseFloat(e.target.value) || 0})} className="w-32 p-2 border rounded-lg text-sm font-bold text-right text-black bg-white" />
                           </div>
                           <button onClick={handleCreateIndirect} disabled={saving === "new_ind" || !newIndirect.item_name} className="bg-green-500 hover:bg-green-600 text-white p-2 rounded-lg disabled:opacity-50">
                             {saving === "new_ind" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
                           </button>
-                          <button onClick={() => { setShowNewIndirect(false); setNewIndirect({ item_name: "", cost_type: "fixed", amount: 0 }); }} className="bg-gray-200 hover:bg-gray-300 text-gray-700 p-2 rounded-lg">
+                          <button onClick={() => { setShowNewIndirect(false); setNewIndirect({ item_name: "", cost_type: "fixed", amount: 0, start_date: new Date().toISOString().split("T")[0], end_date: "" }); }} className="bg-gray-200 hover:bg-gray-300 text-gray-700 p-2 rounded-lg">
                             <X className="h-4 w-4" />
                           </button>
                         </div>
                       </div>
                     )}
 
-                    {data.indirect.map((ind: any) => (
-                      <div key={ind.id} className="flex justify-between items-center p-4 bg-gray-50 rounded-xl border border-gray-100">
-                         <div><p className="font-bold text-gray-800 text-black">{ind.item_name}</p><p className="text-xs text-gray-500 text-black">Vigencia: {ind.start_date} a {ind.end_date || 'Actual'}</p></div>
-                         <div className="flex items-center space-x-4">
-                            <span className={`text-[10px] px-2 py-1 font-bold rounded uppercase ${ind.cost_type === 'fixed' ? 'bg-blue-50 text-blue-600' : 'bg-orange-50 text-orange-600'}`}>
-                              {ind.cost_type}
-                            </span>
-                            <div className="text-right">
-                                <p className="text-[10px] font-bold text-gray-400 uppercase">Monto</p>
-                                <p className="text-sm font-bold text-gray-900 text-black">{formatCurrency(ind.amount)}</p>
-                            </div>
-                         </div>
-                      </div>
-                    ))}
+                    <div className="space-y-4">
+                      {data.indirect.map((ind: any) => (
+                        <div key={ind.id} className="flex flex-wrap justify-between items-center p-4 bg-gray-50 rounded-xl border border-gray-100 gap-4">
+                           <div className="flex-1 min-w-[200px]">
+                             <p className="font-bold text-gray-800 text-black">{ind.item_name}</p>
+                             <div className="flex items-center gap-2 mt-2">
+                               <div className="flex flex-col">
+                                 <span className="text-[9px] text-gray-400 font-bold uppercase">Inicio</span>
+                                 <input 
+                                   type="date" 
+                                   defaultValue={ind.start_date}
+                                   onBlur={(e) => {
+                                     if (e.target.value && e.target.value !== ind.start_date) {
+                                       handleUpdate("indirect", ind.id, { start_date: e.target.value }, updateIndirectCost);
+                                     }
+                                   }}
+                                   className="text-xs p-1 border border-gray-200 rounded text-black bg-white w-28"
+                                 />
+                               </div>
+                               <div className="flex flex-col">
+                                 <span className="text-[9px] text-gray-400 font-bold uppercase">Fin</span>
+                                 <input 
+                                   type="date" 
+                                   defaultValue={ind.end_date || ""}
+                                   onBlur={(e) => {
+                                     const val = e.target.value || null;
+                                     if (val !== ind.end_date) {
+                                       handleUpdate("indirect", ind.id, { end_date: val }, updateIndirectCost);
+                                     }
+                                   }}
+                                   className="text-xs p-1 border border-gray-200 rounded text-black bg-white w-28"
+                                 />
+                               </div>
+                             </div>
+                           </div>
+                           <div className="flex items-center space-x-4">
+                              <select
+                                value={ind.cost_type}
+                                onChange={(e) => handleUpdate("indirect", ind.id, { cost_type: e.target.value }, updateIndirectCost)}
+                                className="text-xs font-bold border border-gray-200 rounded p-1 bg-white text-black animate-none"
+                              >
+                                <option value="fixed">Fijo</option>
+                                <option value="variable">Variable</option>
+                              </select>
+                              <div className="text-right">
+                                  <p className="text-[10px] font-bold text-gray-400 uppercase mb-0.5">Monto Mensual</p>
+                                  <div className="flex items-center gap-1">
+                                    <span className="text-sm font-bold text-black">$</span>
+                                    <input 
+                                      type="number"
+                                      defaultValue={ind.amount}
+                                      onBlur={(e) => {
+                                        const val = parseFloat(e.target.value) || 0;
+                                        if (val !== ind.amount) {
+                                          handleUpdate("indirect", ind.id, { amount: val }, updateIndirectCost);
+                                        }
+                                      }}
+                                      className="text-sm font-bold border border-transparent hover:border-gray-200 focus:border-gray-300 rounded p-0.5 bg-transparent text-right w-24 text-black focus:bg-white"
+                                    />
+                                  </div>
+                              </div>
+                              <div className="w-8 flex justify-center">{saving === ind.id ? <Loader2 className="h-4 w-4 animate-spin text-orange-500" /> : <Save className="h-4 w-4 text-gray-300" />}</div>
+                           </div>
+                        </div>
+                      ))}
+                    </div>
                    </div>
                 )}
 

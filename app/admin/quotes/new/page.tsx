@@ -222,10 +222,20 @@ export default function NewQuotationPage() {
               </h2>
               <PricingCalculator 
                 onAdd={(config, pricingResult) => {
+                  let desc = "";
+                  const dims = config.dimensions || {};
+                  if (config.product_line === "Corrugado") {
+                    desc = `Caja Corrugada ${dims.length_mm || 0}x${dims.width_mm || 0}x${dims.height_mm || 0} mm`;
+                  } else if (config.product_line === "Esquineros") {
+                    desc = `Esquinero de Cartón ${dims.length_mm || 0}x${dims.wing_1_mm || 0}x${dims.thickness_mm || 0} mm`;
+                  } else {
+                    desc = `${config.product_line === "Tubos" ? "Tubo" : "Envase"} de Cartón Ø${dims.diameter_mm || 0}x${dims.length_mm || 0} mm (Pared ${dims.thickness_mm || 0} mm)`;
+                  }
+
                   append({
                     productId: "",
-                    description: `${config.category} ${config.dimensions?.length || ''}x${config.dimensions?.diameter || ''}`,
-                    quantity: config.quantity,
+                    description: desc,
+                    quantity: config.requested_quantity || 1000,
                     unitPrice: pricingResult.unit_price,
                     totalPrice: pricingResult.total_price,
                     configuration: config
