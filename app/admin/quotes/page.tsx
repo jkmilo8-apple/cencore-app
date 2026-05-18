@@ -171,20 +171,9 @@ export default function QuotesPage() {
                         {clientEmail && <div className="text-xs text-gray-400">{clientEmail}</div>}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="relative inline-block">
-                          <select
-                            value={quote.status}
-                            onChange={(e) => handleStatusChange(quote.id, e.target.value)}
-                            className={`text-[11px] font-bold uppercase tracking-tight px-3 py-1 rounded-full border-0 ${st.style} cursor-pointer focus:ring-2 focus:ring-[#F97316] outline-none appearance-none pr-6`}
-                          >
-                            <option value="draft">Borrador</option>
-                            <option value="sent">Enviada</option>
-                            <option value="review">En Revisión</option>
-                            <option value="approved">Aprobada</option>
-                            <option value="rejected">Rechazada</option>
-                          </select>
-                          <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 h-3 w-3 opacity-50 pointer-events-none" />
-                        </div>
+                        <span className={`inline-flex items-center text-[10px] font-extrabold uppercase tracking-widest px-2.5 py-1 rounded-full border border-gray-150 ${st.style}`}>
+                          {st.label}
+                        </span>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm font-bold text-gray-900 text-right">
                         {formatCurrency(quote.total_amount)}

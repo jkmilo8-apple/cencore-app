@@ -142,6 +142,73 @@ export async function createQuoteAction(quoteData: {
   return { data: quote as Quote, error: null };
 }
 
+// ─── UPDATE QUOTE ───────────────────────────────────────────────────
+export async function updateQuoteAction(id: string, quoteData: {
+  client_id: string;
+  total_amount: number;
+  notes?: string;
+  urgent_delivery?: boolean;
+  items: {
+    product_id: string;
+    quantity: number;
+    unit_price: number;
+    total_price: number;
+    configuration?: any;
+  }[];
+}) {
+  const supabase = await createClient();
+
+  // 1. Update quote (automatically resets status to draft when corrected)
+  const { data: quote, error: quoteError } = await supabase
+    .from("quotes")
+    .update({
+      client_id: quoteData.client_id,
+      total_amount: quoteData.total_amount,
+      notes: quoteData.notes || null,
+      urgent_delivery: quoteData.urgent_delivery || false,
+      status: "draft",
+      updated_at: new Date().toISOString()
+    })
+    .eq("id", id)
+    .select()
+    .single();
+
+  if (quoteError) {
+    console.error("Error updating quote:", quoteError);
+    return { data: null, error: quoteError.message };
+  }
+
+  // 2. Delete existing items
+  const { error: deleteError } = await supabase
+    .from("quote_items")
+    .delete()
+    .eq("quote_id", id);
+
+  if (deleteError) {
+    console.error("Error deleting quote items:", deleteError);
+    return { data: quote as Quote, error: `Quote updated but items replacement failed: ${deleteError.message}` };
+  }
+
+  // 3. Insert new items
+  if (quoteData.items.length > 0) {
+    const itemsToInsert = quoteData.items.map((item) => ({
+      ...item,
+      quote_id: id,
+    }));
+
+    const { error: itemsError } = await supabase
+      .from("quote_items")
+      .insert(itemsToInsert);
+
+    if (itemsError) {
+      console.error("Error inserting quote items:", itemsError);
+      return { data: quote as Quote, error: `Quote updated but items insertion failed: ${itemsError.message}` };
+    }
+  }
+
+  return { data: quote as Quote, error: null };
+}
+
 // ─── UPDATE QUOTE STATUS ────────────────────────────────────────────
 export async function updateQuoteStatusAction(id: string, status: string) {
   const supabase = await createClient();
@@ -241,6 +308,10 @@ export async function sendQuoteToClientAction(id: string) {
     .single();
 
   if (quoteErr || !quote) return { success: false, error: "Cotización no encontrada." };
+
+  if (quote.status !== "approved") {
+    return { success: false, error: "Solo se pueden enviar cotizaciones en estado Aprobada." };
+  }
 
   const client = quote.clients as any;
   if (!client?.email) return { success: false, error: "El cliente no tiene email registrado." };

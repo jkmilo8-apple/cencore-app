@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, Suspense } from "react";
 import { useForm, useWatch, useFieldArray } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
@@ -20,7 +20,7 @@ import {
   Package
 } from "lucide-react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { getClients } from "@/actions/clients";
 import { getProducts } from "@/actions/products";
 import { createQuoteAction } from "@/actions/quotes";
@@ -50,8 +50,11 @@ const CATEGORIES = [
   { id: "Accesorios", name: "Esquineros", icon: Layers, description: "Protección y estibado" },
 ];
 
-export default function NewQuotationPage() {
+function NewQuotationForm() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const editId = searchParams.get("edit");
+
   const [clients, setClients] = useState<Client[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [config, setConfig] = useState<Record<string, string>>({});
@@ -90,10 +93,34 @@ export default function NewQuotationPage() {
       });
       setConfig(configMap);
       
+      if (editId) {
+        const { getQuote } = await import("@/actions/quotes");
+        const { data: existingQuote, items: existingItems } = await getQuote(editId);
+        if (existingQuote) {
+          setValue("clientId", existingQuote.client_id);
+          setValue("urgentDelivery", existingQuote.urgent_delivery || false);
+          setValue("notes", existingQuote.notes || "");
+          
+          if (existingItems && existingItems.length > 0) {
+            remove(); // remove defaults
+            existingItems.forEach((item: any) => {
+              append({
+                productId: item.product_id || "",
+                description: item.description || "Producto Personalizado",
+                quantity: item.quantity,
+                unitPrice: Number(item.unit_price),
+                totalPrice: Number(item.total_price),
+                configuration: item.configuration
+              });
+            });
+          }
+        }
+      }
+      
       setLoading(false);
     }
     loadData();
-  }, []);
+  }, [editId]);
 
   const watchedItems = useWatch({ control, name: "items" }) || [];
   const urgentDelivery = useWatch({ control, name: "urgentDelivery" }) || false;
@@ -130,25 +157,50 @@ export default function NewQuotationPage() {
   const onSubmit = async (data: QuotationFormValues) => {
     setIsSubmitting(true);
 
-    const { data: quote, error } = await createQuoteAction({
-      client_id: data.clientId,
-      total_amount: pricing.total,
-      notes: data.notes || "",
-      urgent_delivery: data.urgentDelivery,
-      items: data.items.map((item, idx) => ({
-        product_id: products[0]?.id || null, // Fallback product_id for DB if required
-        quantity: item.quantity,
-        unit_price: item.unitPrice,
-        total_price: item.totalPrice,
-        configuration: item.configuration
-      })) as any
-    });
+    if (editId) {
+      const { updateQuoteAction } = await import("@/actions/quotes");
+      const { data: quote, error } = await updateQuoteAction(editId, {
+        client_id: data.clientId,
+        total_amount: pricing.total,
+        notes: data.notes || "",
+        urgent_delivery: data.urgentDelivery,
+        items: data.items.map((item, idx) => ({
+          product_id: products[0]?.id || null,
+          quantity: item.quantity,
+          unit_price: item.unitPrice,
+          total_price: item.totalPrice,
+          configuration: item.configuration
+        })) as any
+      });
 
-    if (error) {
-      alert("Error al crear la cotización: " + error);
-      setIsSubmitting(false);
-    } else if (quote) {
-      router.push(`/admin/quotes/${quote.id}`);
+      if (error) {
+        alert("Error al guardar la cotización: " + error);
+        setIsSubmitting(false);
+      } else if (quote) {
+        router.push(`/admin/quotes/${quote.id}`);
+      }
+    } else {
+      const { createQuoteAction } = await import("@/actions/quotes");
+      const { data: quote, error } = await createQuoteAction({
+        client_id: data.clientId,
+        total_amount: pricing.total,
+        notes: data.notes || "",
+        urgent_delivery: data.urgentDelivery,
+        items: data.items.map((item, idx) => ({
+          product_id: products[0]?.id || null, // Fallback product_id for DB if required
+          quantity: item.quantity,
+          unit_price: item.unitPrice,
+          total_price: item.totalPrice,
+          configuration: item.configuration
+        })) as any
+      });
+
+      if (error) {
+        alert("Error al crear la cotización: " + error);
+        setIsSubmitting(false);
+      } else if (quote) {
+        router.push(`/admin/quotes/${quote.id}`);
+      }
     }
   };
 
@@ -172,8 +224,12 @@ export default function NewQuotationPage() {
               <ArrowLeft className="h-5 w-5 text-gray-500" />
             </Link>
             <div>
-              <h1 className="text-xl font-bold text-[#1F2937] tracking-tight">Consola de Operaciones</h1>
-              <p className="text-xs text-gray-400 font-medium uppercase tracking-widest">Nueva Cotización Industrial</p>
+              <h1 className="text-xl font-bold text-[#1F2937] tracking-tight">
+                {editId ? "Corregir Cotización" : "Consola de Operaciones"}
+              </h1>
+              <p className="text-xs text-gray-400 font-medium uppercase tracking-widest">
+                {editId ? "Editar y Reenviar Cotización Industrial" : "Nueva Cotización Industrial"}
+              </p>
             </div>
           </div>
           <div className="flex items-center space-x-4 border-l pl-6 border-gray-100">
@@ -417,7 +473,7 @@ export default function NewQuotationPage() {
                     disabled={isSubmitting || watchedItems.length === 0}
                     className="w-full py-4 px-6 bg-[#F97316] hover:bg-[#EA580C] text-white rounded-xl font-bold text-sm uppercase tracking-widest shadow-lg shadow-[#F97316]/20 transition-all active:scale-95 disabled:opacity-50 disabled:grayscale"
                   >
-                    {isSubmitting ? "Emitiendo..." : "Generar Cotización"}
+                    {isSubmitting ? "Guardando..." : (editId ? "Guardar Corrección" : "Generar Cotización")}
                   </button>
                   <button
                     type="button"
@@ -439,5 +495,18 @@ export default function NewQuotationPage() {
         </form>
       </main>
     </div>
+  );
+}
+
+export default function NewQuotationPage() {
+  return (
+    <Suspense fallback={
+      <div className="flex flex-col items-center justify-center min-h-screen bg-[#FFF8F6]">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#F97316]"></div>
+        <p className="mt-4 text-gray-500 font-medium">Cargando Consola de Operaciones...</p>
+      </div>
+    }>
+      <NewQuotationForm />
+    </Suspense>
   );
 }

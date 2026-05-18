@@ -27,10 +27,24 @@ export default function QuoteDetailPage() {
   const [sending, setSending] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [toast, setToast] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [updatingStatus, setUpdatingStatus] = useState<string | null>(null);
 
   const showToast = (type: "success" | "error", text: string) => {
     setToast({ type, text });
     setTimeout(() => setToast(null), 4000);
+  };
+
+  const handleUpdateStatus = async (newStatus: string) => {
+    setUpdatingStatus(newStatus);
+    const { updateQuoteStatusAction } = await import("@/actions/quotes");
+    const { data, error } = await updateQuoteStatusAction(id, newStatus);
+    setUpdatingStatus(null);
+    if (error) {
+      showToast("error", error || "Error al actualizar el estado.");
+    } else {
+      showToast("success", `Estado de cotización actualizado a "${statusConfig[newStatus]?.label}" ✓`);
+      setQuote((prev: any) => ({ ...prev, status: newStatus }));
+    }
   };
 
   useEffect(() => {
@@ -90,7 +104,7 @@ export default function QuoteDetailPage() {
   const total = subtotal + tax;
   const st = statusConfig[quote?.status] || statusConfig["draft"];
   const isDraft = quote?.status === "draft";
-  const canSend = isDraft && !!client?.email;
+  const canSend = quote?.status === "approved" && !!client?.email;
 
   return (
     <div className="max-w-5xl mx-auto space-y-6">
@@ -122,6 +136,107 @@ export default function QuoteDetailPage() {
           <span className={`inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-full text-xs font-bold border ${st.color}`}>
             {st.icon}<span>{st.label}</span>
           </span>
+
+          {/* Status Transitions state machine toolbar */}
+          <div className="flex items-center space-x-1 bg-gray-50 p-1 rounded-lg border border-gray-200">
+            {/* Draft transitions */}
+            {quote?.status === "draft" && (
+              <>
+                <button
+                  onClick={() => handleUpdateStatus("review")}
+                  disabled={updatingStatus !== null}
+                  title="Poner en Revisión"
+                  className="inline-flex items-center px-2.5 py-1.5 text-xs font-bold rounded text-white bg-yellow-500 hover:bg-yellow-600 transition-colors disabled:opacity-60"
+                >
+                  <Clock className="h-3.5 w-3.5 mr-1" />
+                  <span>Revisar</span>
+                </button>
+                <button
+                  onClick={() => handleUpdateStatus("rejected")}
+                  disabled={updatingStatus !== null}
+                  title="Rechazar Cotización"
+                  className="inline-flex items-center px-2.5 py-1.5 text-xs font-bold rounded text-white bg-red-600 hover:bg-red-700 transition-colors disabled:opacity-60"
+                >
+                  <XCircle className="h-3.5 w-3.5 mr-1" />
+                  <span>Rechazar</span>
+                </button>
+              </>
+            )}
+
+            {/* Review transitions */}
+            {quote?.status === "review" && (
+              <>
+                <button
+                  onClick={() => handleUpdateStatus("approved")}
+                  disabled={updatingStatus !== null}
+                  title="Aprobar Cotización"
+                  className="inline-flex items-center px-2.5 py-1.5 text-xs font-bold rounded text-white bg-green-600 hover:bg-green-700 transition-colors disabled:opacity-60"
+                >
+                  <CheckCircle2 className="h-3.5 w-3.5 mr-1" />
+                  <span>Aprobar</span>
+                </button>
+                <button
+                  onClick={() => handleUpdateStatus("rejected")}
+                  disabled={updatingStatus !== null}
+                  title="Rechazar Cotización"
+                  className="inline-flex items-center px-2.5 py-1.5 text-xs font-bold rounded text-white bg-red-600 hover:bg-red-700 transition-colors disabled:opacity-60"
+                >
+                  <XCircle className="h-3.5 w-3.5 mr-1" />
+                  <span>Rechazar</span>
+                </button>
+                <button
+                  onClick={() => handleUpdateStatus("draft")}
+                  disabled={updatingStatus !== null}
+                  title="Volver a Borrador"
+                  className="inline-flex items-center px-2.5 py-1.5 text-xs font-bold rounded text-gray-700 bg-white hover:bg-gray-100 border border-gray-300 transition-colors disabled:opacity-60"
+                >
+                  <FileText className="h-3.5 w-3.5 mr-1 text-gray-400" />
+                  <span>Borrador</span>
+                </button>
+              </>
+            )}
+
+            {/* Approved transitions */}
+            {quote?.status === "approved" && (
+              <button
+                onClick={() => handleUpdateStatus("review")}
+                disabled={updatingStatus !== null}
+                title="Volver a Revisión"
+                className="inline-flex items-center px-2.5 py-1.5 text-xs font-bold rounded text-white bg-yellow-500 hover:bg-yellow-600 transition-colors disabled:opacity-60"
+              >
+                <Clock className="h-3.5 w-3.5 mr-1" />
+                <span>Revisar</span>
+              </button>
+            )}
+
+            {/* Rejected transitions */}
+            {quote?.status === "rejected" && (
+              <button
+                onClick={() => handleUpdateStatus("draft")}
+                disabled={updatingStatus !== null}
+                title="Volver a Borrador para corregir"
+                className="inline-flex items-center px-2.5 py-1.5 text-xs font-bold rounded text-gray-700 bg-white hover:bg-gray-100 border border-gray-300 transition-colors disabled:opacity-60"
+              >
+                <FileText className="h-3.5 w-3.5 mr-1 text-gray-400" />
+                <span>Borrador</span>
+              </button>
+            )}
+
+            {/* Sent status */}
+            {quote?.status === "sent" && (
+              <span className="text-xs text-gray-500 font-bold px-2 py-1 flex items-center">
+                <CheckCircle2 className="h-3.5 w-3.5 mr-1 text-green-500" />
+                Cotización Finalizada
+              </span>
+            )}
+          </div>
+
+          <Link
+            href={`/admin/quotes/new?edit=${id}`}
+            className="inline-flex items-center px-4 py-2 border border-[#F97316] shadow-sm text-sm font-medium rounded-md text-[#F97316] bg-white hover:bg-[#FFF8F6] transition-colors"
+          >
+            <FileText className="mr-2 h-4 w-4 text-[#F97316]" /> Corregir / Editar
+          </Link>
 
           <button
             onClick={handlePrint}
