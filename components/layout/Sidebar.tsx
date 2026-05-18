@@ -18,7 +18,7 @@ export default function Sidebar() {
   const pathname = usePathname();
 
   return (
-    <div className="flex flex-col w-64 bg-[#1F2937] text-white min-h-screen">
+    <div className="flex flex-col w-64 bg-[#1F2937] text-white min-h-screen no-print">
       <div className="flex items-center justify-center h-16 bg-[#111827] border-b border-gray-800">
         <span className="text-xl font-bold text-white tracking-wide">
           CENCORE<span className="text-[#F97316]">.</span>

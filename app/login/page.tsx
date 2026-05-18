@@ -3,20 +3,33 @@
 import Link from "next/link";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Lock, User } from "lucide-react";
+import { Lock, User, AlertCircle } from "lucide-react";
+import { signInAction } from "@/actions/auth";
 
 export default function LoginPage() {
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
+  const [authError, setAuthError] = useState<string | null>(null);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-    // Simulated login delay
-    await new Promise((resolve) => setTimeout(resolve, 1000));
-    router.push("/admin");
+    setAuthError(null);
+    
+    const formData = new FormData();
+    formData.append("email", email);
+    formData.append("password", password);
+    
+    const { error } = await signInAction(formData);
+    
+    if (error) {
+      setAuthError(error);
+      setLoading(false);
+    } else {
+      router.push("/admin");
+    }
   };
 
   return (
@@ -44,6 +57,13 @@ export default function LoginPage() {
 
           <h2 className="text-2xl font-semibold text-gray-900 mb-2">Bienvenido</h2>
           <p className="text-sm text-gray-500 mb-8">Ingrese sus credenciales corporativas para continuar.</p>
+
+          {authError && (
+            <div className="mb-6 p-4 bg-red-50 text-red-600 rounded-lg text-sm font-medium flex items-center space-x-2 border border-red-200">
+              <AlertCircle className="h-5 w-5" />
+              <span>{authError}</span>
+            </div>
+          )}
 
           <form onSubmit={handleLogin} className="space-y-5">
             <div>

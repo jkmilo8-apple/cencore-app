@@ -28,7 +28,21 @@ export async function updateSession(request: NextRequest) {
   )
 
   // Refresh the auth token
-  await supabase.auth.getUser()
+  const { data: { user } } = await supabase.auth.getUser()
+
+  // Proteger rutas de /admin
+  if (request.nextUrl.pathname.startsWith('/admin') && !user) {
+    const url = request.nextUrl.clone()
+    url.pathname = '/login'
+    return NextResponse.redirect(url)
+  }
+
+  // Si está autenticado y trata de ir a login, redireccionar a /admin
+  if (request.nextUrl.pathname.startsWith('/login') && user) {
+    const url = request.nextUrl.clone()
+    url.pathname = '/admin'
+    return NextResponse.redirect(url)
+  }
 
   return supabaseResponse
 }

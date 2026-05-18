@@ -24,3 +24,86 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* ─── PRINT STYLES ───────────────────────────────────────────────── */
+@media print {
+  /* 1. Ocultar sidebar, header y controles */
+  .no-print {
+    display: none !important;
+  }
+
+  /* 2. Mostrar elementos solo de impresión */
+  .print-only {
+    display: flex !important;
+  }
+
+  /* 3. Resetear el layout flex del admin (flex h-screen overflow-hidden) */
+  html, body {
+    height: auto !important;
+    overflow: visible !important;
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  /* 4. Todos los contenedores: sin overflow ni altura fija */
+  body *,
+  body > div,
+  body > div > div,
+  main {
+    overflow: visible !important;
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    float: none !important;
+  }
+
+  /* 5. El área del contenido principal ocupa todo el ancho */
+  main > div {
+    padding: 0 !important;
+    margin: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+
+  /* 6. Quitar max-width del contenedor de la cotización */
+  .max-w-5xl,
+  .max-w-4xl,
+  .max-w-3xl {
+    max-width: 100% !important;
+    width: 100% !important;
+  }
+
+  /* 7. Grids y tablas se adaptan al ancho */
+  .grid {
+    display: block !important;
+  }
+
+  .overflow-x-auto {
+    overflow: visible !important;
+  }
+
+  table {
+    width: 100% !important;
+    table-layout: fixed !important;
+    font-size: 11px !important;
+  }
+
+  th, td {
+    word-break: break-word !important;
+    white-space: normal !important;
+  }
+
+  /* 8. Sin sombras */
+  * {
+    box-shadow: none !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  /* 9. Página A4 */
+  @page {
+    size: A4 portrait;
+    margin: 1.5cm;
+  }
+}

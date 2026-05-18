@@ -25,13 +25,18 @@ import { getClients } from "@/actions/clients";
 import { getProducts } from "@/actions/products";
 import { createQuoteAction } from "@/actions/quotes";
 import { getCommercialConfig } from "@/actions/config";
+import PricingCalculator from "@/components/PricingCalculator";
 import type { Client, Product } from "@/types/database";
 
 const quotationSchema = z.object({
   clientId: z.string().min(1, "Seleccione un cliente"),
   items: z.array(z.object({
-    productId: z.string().min(1, "Seleccione un producto"),
+    productId: z.string().optional(),
+    description: z.string().optional(),
     quantity: z.number().min(1, "Mínimo 1"),
+    unitPrice: z.number(),
+    totalPrice: z.number(),
+    configuration: z.any().optional()
   })).min(1, "Agregue al menos un producto"),
   urgentDelivery: z.boolean(),
   notes: z.string().optional(),
@@ -58,7 +63,7 @@ export default function NewQuotationPage() {
     resolver: zodResolver(quotationSchema),
     defaultValues: {
       clientId: "",
-      items: [{ productId: "", quantity: 1 }],
+      items: [],
       urgentDelivery: false,
       notes: ""
     }
@@ -96,9 +101,8 @@ export default function NewQuotationPage() {
   const calculateTotals = () => {
     let subtotal = 0;
     const itemDetails = watchedItems.map((item) => {
-      const product = products.find(p => p.id === item.productId);
-      const unitPrice = product ? Number(product.price) : 0;
-      const totalItem = unitPrice * (item.quantity || 0);
+      const unitPrice = item.unitPrice || 0;
+      const totalItem = item.totalPrice || 0;
       subtotal += totalItem;
       return { unitPrice, totalItem };
     });
@@ -132,11 +136,12 @@ export default function NewQuotationPage() {
       notes: data.notes || "",
       urgent_delivery: data.urgentDelivery,
       items: data.items.map((item, idx) => ({
-        product_id: item.productId,
+        product_id: products[0]?.id || null, // Fallback product_id for DB if required
         quantity: item.quantity,
-        unit_price: pricing.itemDetails[idx]?.unitPrice || 0,
-        total_price: pricing.itemDetails[idx]?.totalItem || 0
-      }))
+        unit_price: item.unitPrice,
+        total_price: item.totalPrice,
+        configuration: item.configuration
+      })) as any
     });
 
     if (error) {
@@ -209,41 +214,24 @@ export default function NewQuotationPage() {
               </div>
             </section>
 
-            {/* Step 2: Category Selector (Stitch Mockup Style) */}
-            <section>
-              <h2 className="text-sm font-bold text-gray-800 uppercase tracking-wider flex items-center mb-4 ml-2">
+            {/* Step 2: Calculator */}
+            <section className="mb-8">
+               <h2 className="text-sm font-bold text-gray-800 uppercase tracking-wider flex items-center mb-4 ml-2">
                 <span className="bg-[#F97316] text-white h-6 w-6 rounded-md flex items-center justify-center mr-3 text-xs">2</span>
-                Seleccione el Tipo de Empaque
+                Configuración Industrial
               </h2>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                {CATEGORIES.map((cat) => (
-                  <button
-                    key={cat.id}
-                    type="button"
-                    onClick={() => setSelectedCategory(cat.id)}
-                    className={`relative p-5 text-left rounded-xl border-2 transition-all duration-200 group ${
-                      selectedCategory === cat.id
-                        ? "border-[#F97316] bg-white shadow-lg shadow-[#F97316]/5"
-                        : "border-transparent bg-white/60 hover:bg-white hover:border-gray-200"
-                    }`}
-                  >
-                    <div className={`h-12 w-12 rounded-lg flex items-center justify-center mb-4 transition-colors ${
-                      selectedCategory === cat.id ? "bg-[#F97316] text-white" : "bg-gray-100 text-gray-400 group-hover:bg-gray-200"
-                    }`}>
-                      <cat.icon className="h-6 w-6" />
-                    </div>
-                    <h3 className={`font-bold text-base ${selectedCategory === cat.id ? "text-gray-900" : "text-gray-500"}`}>{cat.name}</h3>
-                    <p className="text-xs text-gray-400 mt-1 leading-relaxed">{cat.description}</p>
-                    {selectedCategory === cat.id && (
-                      <div className="absolute top-4 right-4">
-                        <div className="h-5 w-5 bg-[#F97316] rounded-full flex items-center justify-center">
-                          <ChevronRight className="h-3 w-3 text-white" />
-                        </div>
-                      </div>
-                    )}
-                  </button>
-                ))}
-              </div>
+              <PricingCalculator 
+                onAdd={(config, pricingResult) => {
+                  append({
+                    productId: "",
+                    description: `${config.category} ${config.dimensions?.length || ''}x${config.dimensions?.diameter || ''}`,
+                    quantity: config.quantity,
+                    unitPrice: pricingResult.unit_price,
+                    totalPrice: pricingResult.total_price,
+                    configuration: config
+                  });
+                }}
+              />
             </section>
 
             {/* Step 3: Product Configuration */}
@@ -251,15 +239,8 @@ export default function NewQuotationPage() {
               <div className="bg-gray-50 px-6 py-4 border-b border-gray-100 flex items-center justify-between">
                 <h2 className="text-sm font-bold text-gray-800 uppercase tracking-wider flex items-center">
                   <span className="bg-[#F97316] text-white h-6 w-6 rounded-md flex items-center justify-center mr-3 text-xs">3</span>
-                  Dimensiones y Especificaciones
+                  Ítems Cotizados
                 </h2>
-                <button
-                  type="button"
-                  onClick={() => append({ productId: "", quantity: 1 })}
-                  className="inline-flex items-center px-4 py-2 text-xs font-bold uppercase tracking-widest text-[#F97316] hover:bg-[#F97316]/5 rounded-lg transition-colors"
-                >
-                  <Plus className="mr-2 h-4 w-4" /> Agregar Ítem
-                </button>
               </div>
               
               <div className="p-6 space-y-6">
@@ -289,20 +270,13 @@ export default function NewQuotationPage() {
                         })()}
                       </div>
                       <div className="flex-1">
-                        <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">Producto ({selectedCategory})</label>
-                        <select
-                          {...register(`items.${index}.productId`)}
-                          className="block w-full text-sm border-gray-200 rounded-lg p-2.5 border focus:ring-2 focus:ring-[#F97316]/20 focus:border-[#F97316] bg-white transition-all text-black font-medium"
-                        >
-                          <option value="">Seleccionar producto...</option>
-                          {products
-                            .filter(p => p.category === selectedCategory || !p.category)
-                            .map(p => (
-                              <option key={p.id} value={p.id}>
-                                {p.name} — {formatCurrency(Number(p.price))}
-                              </option>
-                            ))}
-                        </select>
+                        <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">Producto Configurado</label>
+                        <input
+                          type="text"
+                          readOnly
+                          value={watchedItems[index]?.description || "Producto Personalizado"}
+                          className="block w-full text-sm border-gray-200 rounded-lg p-2.5 border bg-gray-100 text-black font-medium"
+                        />
                       </div>
                     </div>
                     <div className="lg:col-span-2">

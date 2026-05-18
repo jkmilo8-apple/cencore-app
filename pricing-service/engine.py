@@ -1,148 +1,301 @@
+"""
+Motor de Precios V2 — Cencore SAS
+Patrón Strategy: cada línea de producto tiene su calculadora especializada.
+"""
 import os
+import math
+from abc import ABC, abstractmethod
 from supabase import create_client, Client
 from dotenv import load_dotenv
-from models import PricingRequest, PricingResponse, PricingBreakdown
+from models import (
+    PricingRequest, PricingResponse, PricingBreakdown,
+    BOMLayer, BOMAccessory, RoutingStep
+)
 
 load_dotenv()
 
-class PricingEngine:
-    # Supabase Client
-    supabase: Client = create_client(
+# ── Cliente Supabase ─────────────────────────────────────────────────
+def get_supabase() -> Client:
+    return create_client(
         os.getenv("SUPABASE_URL"),
         os.getenv("SUPABASE_KEY")
     )
 
-    FACTORY_OVERHEAD_RATE_DEFAULT = 0.15
+
+# ── Clase Base Abstracta ──────────────────────────────────────────────
+class BasePricingCalculator(ABC):
     DEFAULT_MARGIN = 0.25
 
-    @classmethod
-    async def calculate_pricing(cls, request: PricingRequest) -> PricingResponse:
-        # 0. Cargar Configuración desde Supabase
-        config = await cls._fetch_full_config(request)
-        
-        # 1. Materias Primas con factor de desperdicio
-        material_cost_per_kg = config["material_cost"]
-        weight = cls._calculate_weight(request)
-        total_raw_materials = weight * material_cost_per_kg * request.quantity * config["ref"]["waste_factor"]
-        
-        # 2. Mano de Obra Directa (MOD) + Tiempo de Alistamiento
-        hourly_rate = config["labor_rate"]
-        units_per_hour = config["product_config"]["machine_speed"]
-        production_hours = request.quantity / units_per_hour
-        total_hours = (production_hours + config["ref"]["setup_time"]) * config["ref"]["labor_multiplier"]
-        total_labor = total_hours * hourly_rate
-        
-        # 3. Cargas Fabriles (CIF)
-        overhead_rate = config["product_config"].get("overhead_rate", cls.FACTORY_OVERHEAD_RATE_DEFAULT)
-        total_overheads = total_labor * overhead_rate
-        
-        # 4. Costos Indirectos (NIF) por rango de fechas y participación
-        ind = config["indirect"]
-        monthly_total_indirect = (
-            ind.get("rent", 0) + 
-            ind.get("utilities", 0) + 
-            ind.get("administration", 0) + 
-            ind.get("maintenance", 0) + 
-            ind.get("payroll", 0) + 
-            ind.get("others", 0)
+    def __init__(self, request: PricingRequest, db: Client):
+        self.req = request
+        self.db = db
+
+    # ── Motor de Materiales (BOM) ─────────────────────────────────────
+    @abstractmethod
+    def calculate_materials(self) -> dict:
+        """Retorna {'raw_materials': float, 'accessories_cost': float}"""
+        pass
+
+    # ── Motor Logístico ───────────────────────────────────────────────
+    def calculate_freight(self) -> dict:
+        """Calcula flete proporcional al cubicaje del pedido."""
+        if not self.req.logistics:
+            return {"freight_cost": 0.0, "capacity_used_pct": 0.0}
+
+        truck = (
+            self.db.table("pricing_logistics")
+            .select("*")
+            .eq("truck_type", self.req.logistics.truck_type)
+            .eq("active", True)
+            .execute()
         )
-        
-        # Porcentaje de participación temporal (basado en 160h laborales al mes)
-        participation_percentage = (total_hours / 160.0) * 100
-        total_indirect = monthly_total_indirect * (participation_percentage / 100)
-        
-        # Costo Total de Producción
-        total_cost = total_raw_materials + total_labor + total_overheads + total_indirect
-        
-        # Margen y Precio Final
-        margin_amount = total_cost * cls.DEFAULT_MARGIN
+        if not truck.data:
+            return {"freight_cost": 0.0, "capacity_used_pct": 0.0}
+
+        t = truck.data[0]
+        d = self.req.dimensions
+        # Volumen en m³ (dimensiones en mm → convertir a m)
+        l_m = (d.length_mm or 0) / 1000
+        w_m = (d.width_mm or 0) / 1000
+        h_m = (d.height_mm or 0) / 1000
+        vol_unit_m3 = l_m * w_m * h_m if l_m * w_m * h_m > 0 else 0.0001
+
+        vol_order_m3 = vol_unit_m3 * self.req.requested_quantity
+        capacity_pct = min(vol_order_m3 / float(t["volume_m3"]), 1.0)
+        freight_total = float(t["freight_cost"]) * capacity_pct
+        freight_per_unit = freight_total / self.req.requested_quantity
+
+        return {
+            "freight_cost": round(freight_per_unit * self.req.requested_quantity, 2),
+            "capacity_used_pct": round(capacity_pct * 100, 2)
+        }
+
+    # ── Motor MOD + CIF + NIF ─────────────────────────────────────────
+    def calculate_labor_and_overheads(self) -> dict:
+        """Itera routing steps y distribuye CIF/NIF proporcional al tiempo."""
+        # Tarifa horaria desde pricing_labor_provisions o default
+        labor = self.db.table("pricing_labor_provisions").select("*").limit(1).execute()
+        if labor.data:
+            l = labor.data[0]
+            monthly_cost = (
+                l.get("base_salary", 0) +
+                l.get("cesantias", 0) +
+                l.get("prima", 0) +
+                l.get("eps", 0) +
+                l.get("pension", 0) +
+                l.get("arl", 0) +
+                l.get("transport_subsidy", 0)
+            )
+            hourly_rate = monthly_cost / 160
+        else:
+            hourly_rate = 15000  # fallback
+
+        # Sumar horas de todos los pasos del routing
+        total_hours = 0.0
+        direct_labor = 0.0
+        for step in self.req.routing:
+            prod_hours = self.req.requested_quantity / step.speed if step.speed > 0 else 0
+            step_hours = prod_hours + step.setup_hours
+            total_hours += step_hours
+            direct_labor += step_hours * hourly_rate * step.operator_count
+
+        # CIF y NIF desde costos indirectos
+        date_q = self.req.quote_date or "2026-01-01"
+        indirect = (
+            self.db.table("pricing_indirect_costs")
+            .select("*")
+            .lte("start_date", date_q)
+            .gte("end_date", date_q)
+            .execute()
+        )
+        indirect_data = indirect.data or []
+
+        participation = total_hours / 160.0  # fracción del mes utilizada
+
+        var_monthly = sum(float(i.get("amount", 0)) for i in indirect_data if i.get("cost_type") == "variable")
+        fix_monthly = sum(float(i.get("amount", 0)) for i in indirect_data if i.get("cost_type") == "fixed")
+
+        # Si no hay separación por cost_type usa suma completa para NIF
+        if not var_monthly and not fix_monthly:
+            total_indirect_monthly = sum(float(i.get("amount", 0)) for i in indirect_data)
+            fix_monthly = total_indirect_monthly
+
+        factory_overheads = var_monthly * participation if var_monthly else direct_labor * 0.15
+        indirect_costs = fix_monthly * participation
+
+        return {
+            "direct_labor": round(direct_labor, 2),
+            "factory_overheads": round(factory_overheads, 2),
+            "indirect_costs": round(indirect_costs, 2),
+            "production_hours": round(total_hours, 4),
+        }
+
+    # ── Empaque ───────────────────────────────────────────────────────
+    def calculate_packaging(self) -> float:
+        if not self.req.packaging:
+            return 0.0
+        total = 0.0
+        for pkg_name in self.req.packaging:
+            res = (
+                self.db.table("pricing_materials_catalog")
+                .select("cost_per_unit")
+                .eq("name", pkg_name)
+                .eq("category", "Empaque")
+                .execute()
+            )
+            if res.data:
+                total += float(res.data[0]["cost_per_unit"])
+        return round(total, 2)
+
+    # ── Cálculo final ─────────────────────────────────────────────────
+    async def calculate(self) -> PricingResponse:
+        materials = self.calculate_materials()
+        labor_data = self.calculate_labor_and_overheads()
+        freight_data = self.calculate_freight()
+        packaging_cost = self.calculate_packaging()
+
+        total_cost = (
+            materials["raw_materials"] +
+            materials["accessories_cost"] +
+            labor_data["direct_labor"] +
+            labor_data["factory_overheads"] +
+            labor_data["indirect_costs"] +
+            packaging_cost +
+            freight_data["freight_cost"]
+        )
+
+        margin = self.req.margin if self.req.margin else self.DEFAULT_MARGIN
+        margin_amount = total_cost * margin
         total_price = total_cost + margin_amount
-        unit_price = total_price / request.quantity if request.quantity > 0 else 0
-        
+        unit_price = total_price / self.req.requested_quantity if self.req.requested_quantity > 0 else 0
+
         breakdown = PricingBreakdown(
-            raw_materials=round(total_raw_materials, 2),
-            direct_labor=round(total_labor, 2),
-            factory_overheads=round(total_overheads, 2),
-            indirect_costs=round(total_indirect, 2),
-            participation_percentage=round(participation_percentage, 4),
-            total_cost=round(total_cost, 2),
-            margin_amount=round(margin_amount, 2)
+            raw_materials=materials["raw_materials"],
+            accessories_cost=materials["accessories_cost"],
+            direct_labor=labor_data["direct_labor"],
+            factory_overheads=labor_data["factory_overheads"],
+            indirect_costs=labor_data["indirect_costs"],
+            packaging_cost=packaging_cost,
+            freight_cost=freight_data["freight_cost"],
+            total_production_cost=round(total_cost, 2),
+            margin_amount=round(margin_amount, 2),
+            production_hours=labor_data["production_hours"],
+            capacity_used_pct=freight_data["capacity_used_pct"],
         )
-        
+
         return PricingResponse(
             unit_price=round(unit_price, 2),
             total_price=round(total_price, 2),
-            breakdown=breakdown
+            breakdown=breakdown,
         )
 
-    @classmethod
-    async def _fetch_full_config(cls, request: PricingRequest) -> dict:
-        """Centraliza la obtención de datos de configuración de Supabase."""
-        # 1. Labor Rate
-        labor_res = cls.supabase.table("pricing_labor_rates").select("hourly_rate").eq("category", request.category).execute()
-        labor_rate = labor_res.data[0]["hourly_rate"] if labor_res.data else 10000.0
-
-        # 2. Material Cost
-        mat_res = cls.supabase.table("pricing_material_costs").select("cost_per_kg").eq("material_name", request.material.lower()).execute()
-        mat_cost = mat_res.data[0]["cost_per_kg"] if mat_res.data else 2000.0
-
-        # 3. Product Config (Speed, Overhead)
-        prod_res = cls.supabase.table("pricing_product_configs").select("*").eq("category", request.category).execute()
-        prod_config = prod_res.data[0] if prod_res.data else {"machine_speed": 50, "overhead_rate": 0.15}
-
-        # 4. Indirect Costs (NIF/CIF)
-        date_query = request.quote_date or "2024-01-01"
-        ind_res = cls.supabase.table("pricing_indirect_costs")\
-            .select("*")\
-            .lte("start_date", date_query)\
-            .gte("end_date", date_query)\
+    # ── Helpers ───────────────────────────────────────────────────────
+    def _get_material_cost(self, name: str) -> float:
+        res = (
+            self.db.table("pricing_materials_catalog")
+            .select("cost_per_unit, unit_measure")
+            .eq("name", name)
+            .eq("active", True)
             .execute()
-        indirect = ind_res.data[0] if ind_res.data else {
-            "rent": 5000000, "utilities": 1500000, 
-            "administration": 0, "maintenance": 0, 
-            "payroll": 0, "others": 0
-        }
+        )
+        return float(res.data[0]["cost_per_unit"]) if res.data else 0.0
 
-        # 5. References
-        ref_id = request.reference_id or "DEFAULT"
-        ref_res = cls.supabase.table("pricing_references").select("*").eq("reference_id", ref_id).execute()
-        ref = ref_res.data[0] if ref_res.data else {"labor_multiplier": 1.0, "waste_factor": 1.0, "setup_time": 0.0}
+
+# ── TubosCalculator ───────────────────────────────────────────────────
+class TubosCalculator(BasePricingCalculator):
+    """
+    Calcula materias primas sumando capas de papel en rollo.
+    Área del tubo padre × gramaje de cada capa → kg exactos de papel + pegante.
+    """
+    def calculate_materials(self) -> dict:
+        d = self.req.dimensions
+        bom = self.req.bom
+
+        # Área lateral del tubo en mm² → cm²
+        diameter_mm = d.diameter_mm or (d.width_mm or 50)
+        thickness_mm = d.thickness_mm or 5
+        length_mm = d.length_mm or 100
+
+        r_int = diameter_mm / 2
+        r_ext = r_int + thickness_mm
+        area_cm2 = math.pi * (r_ext**2 - r_int**2) * (length_mm / 10) / 100
+
+        raw_materials = 0.0
+        if bom.layers:
+            for layer in bom.layers:
+                cost_kg = self._get_material_cost(layer.material_name)
+                # Gramaje estimado: área × 0.0006 kg/cm² × capas
+                kg = area_cm2 * 0.0006 * layer.quantity * self.req.requested_quantity
+                raw_materials += kg * cost_kg
+
+            # Pegante
+            if bom.glue_name and bom.glue_grams:
+                glue_cost_kg = self._get_material_cost(bom.glue_name)
+                total_glue_kg = (bom.glue_grams / 1000) * self.req.requested_quantity
+                raw_materials += total_glue_kg * glue_cost_kg
+            else:
+                # Fallback: ~10% del peso total en papel
+                total_kg = area_cm2 * 0.0006 * sum(l.quantity for l in bom.layers) * self.req.requested_quantity
+                glue_res = self.db.table("pricing_materials_catalog").select("cost_per_unit").eq("category", "Pegante").limit(1).execute()
+                glue_cost = float(glue_res.data[0]["cost_per_unit"]) if glue_res.data else 8500
+                raw_materials += total_kg * 0.10 * glue_cost
+
+        return {"raw_materials": round(raw_materials, 2), "accessories_cost": 0.0}
+
+
+# ── EnvasesCalculator ─────────────────────────────────────────────────
+class EnvasesCalculator(TubosCalculator):
+    """
+    Hereda el cálculo de papel de TubosCalculator.
+    Agrega accesorios (tapas, fondos, etiquetas).
+    """
+    def calculate_materials(self) -> dict:
+        base = super().calculate_materials()
+
+        accessories_cost = 0.0
+        if self.req.bom.accessories:
+            for acc in self.req.bom.accessories:
+                unit_cost = self._get_material_cost(acc.material_name)
+                accessories_cost += unit_cost * acc.quantity * self.req.requested_quantity
 
         return {
-            "labor_rate": labor_rate,
-            "material_cost": mat_cost,
-            "product_config": prod_config,
-            "indirect": indirect,
-            "ref": ref
+            "raw_materials": base["raw_materials"],
+            "accessories_cost": round(accessories_cost, 2)
         }
 
-    @classmethod
-    def _calculate_weight(cls, request: PricingRequest) -> float:
-        """Calculates unit weight in kg based on dimensions and category."""
-        d = request.dimensions
-        if request.category == "Tubos":
-            r_int = (d.diameter or 0) / 2
-            r_ext = r_int + (d.thickness or 0)
-            area = 3.14159 * (r_ext**2 - r_int**2)
-            volume_cm3 = area * (d.length or 0)
-            return (volume_cm3 * 0.0006)
-            
-        elif request.category == "Esquineros":
-            surface = ((d.wing_1 or 0) + (d.wing_2 or 0)) * (d.length or 0)
-            volume_cm3 = surface * (d.thickness or 1)
-            return (volume_cm3 * 0.0006)
-            
-        elif request.category == "Cajas":
-            surface = 2 * ((d.length or 0)*(d.width or 0) + 
-                           (d.length or 0)*(d.height or 0) + 
-                           (d.width or 0)*(d.height or 0))
-            return (surface * 0.5 * 0.0006)
-            
-        elif request.category == "Laminas":
-            surface = (d.length or 0) * (d.width or 0)
-            return (surface * 0.1 * 0.0006)
 
-        elif request.category == "Single face":
-            return (d.length or 0) * (d.width or 0) * 0.0004
-            
-        return 0.5
+# ── CorrugadoCalculator ───────────────────────────────────────────────
+class CorrugadoCalculator(BasePricingCalculator):
+    """
+    Parte del costo de la lámina madre (precio por m²).
+    Tiempos basados en golpes/hora del troquelado.
+    """
+    def calculate_materials(self) -> dict:
+        d = self.req.dimensions
+        bom = self.req.bom
+
+        raw_materials = 0.0
+        if bom.lamina_madre:
+            cost_m2 = self._get_material_cost(bom.lamina_madre)
+            # Área en m²: largo × ancho en mm → m²
+            area_m2 = ((d.length_mm or 0) / 1000) * ((d.width_mm or 0) / 1000)
+            raw_materials = cost_m2 * area_m2 * self.req.requested_quantity * 1.10  # 10% merma
+
+        return {"raw_materials": round(raw_materials, 2), "accessories_cost": 0.0}
+
+
+# ── Factory / Strategy Selector ───────────────────────────────────────
+CALCULATOR_MAP: dict = {
+    "Tubos":     TubosCalculator,
+    "Envases":   EnvasesCalculator,
+    "Corrugado": CorrugadoCalculator,
+}
+
+
+class PricingEngine:
+    @staticmethod
+    async def calculate_pricing(request: PricingRequest) -> PricingResponse:
+        db = get_supabase()
+        calculator_cls = CALCULATOR_MAP.get(request.product_line, TubosCalculator)
+        calculator = calculator_cls(request, db)
+        return await calculator.calculate()
