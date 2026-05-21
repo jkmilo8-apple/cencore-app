@@ -243,13 +243,21 @@ export async function calculatePricingAction(pricingData: {
   };
   bom: {
     layers?: { material_name: string; quantity: number }[];
+    glue_name?: string;
+    glue_grams?: number;
+    glue_gms?: number;
+    glue_layers?: number;
     lamina_madre?: string;
     accessories?: { material_name: string; quantity: number }[];
   };
-  routing: { step: string; speed: number; setup_hours: number }[];
-  packaging?: string[];
-  logistics?: { truck_type: string };
+  routing: { step: string; speed: number; setup_hours: number; operator_count?: number; labor_profile?: string }[];
+  packaging?: { material_name: string; quantity?: number }[];
+  logistics?: { truck_type: string; manual_freight_cost?: number | null };
   margin?: number;
+  waste_pct?: number;
+  cabida?: number;
+  margen_puntas_mm?: number;
+  grosor_cuchilla_corte_mm?: number;
   quote_date?: string;
 }) {
   const serviceUrl = process.env.PRICING_SERVICE_URL || "http://localhost:8000";

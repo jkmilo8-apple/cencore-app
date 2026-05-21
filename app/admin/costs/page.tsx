@@ -11,13 +11,14 @@ import {
   getVehicles, updateVehicle, createVehicle,
   getLaborProvisions, updateLaborProvision,
   getIndirectCosts, createIndirectCost, updateIndirectCost,
-  getBusinessLines, updateBusinessLine, createBusinessLine
+  getBusinessLines, updateBusinessLine, createBusinessLine,
+  getLaborProfiles, createLaborProfile, updateLaborProfile
 } from "@/actions/pricing_config";
 
 const TABS = [
   { id: "materials", name: "Catálogo de Materiales (V2)", icon: Layers },
   { id: "labor_routes", name: "Rutas de Producción (V2)", icon: Settings2 },
-  { id: "labor", name: "Mano de Obra", icon: HardHat },
+  { id: "labor", name: "Mano de Obra (V2)", icon: HardHat },
   { id: "indirect", name: "Costos Fijos y Var (NIF/CIF)", icon: Factory },
   { id: "logistics", name: "Logística y Fletes", icon: Truck },
   { id: "business_lines", name: "Líneas de Negocio", icon: Package },
@@ -28,7 +29,7 @@ export default function PricingAdminPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState<string | null>(null);
   const [data, setData] = useState<any>({
-    materials: [], laborRoutes: [], vehicles: [], labor: [], indirect: [], businessLines: []
+    materials: [], laborRoutes: [], vehicles: [], labor: [], laborProfiles: [], indirect: [], businessLines: []
   });
   const [message, setMessage] = useState<{ type: "success" | "error", text: string } | null>(null);
   
@@ -53,14 +54,44 @@ export default function PricingAdminPage() {
   const [showNewBL, setShowNewBL] = useState(false);
   const [newBL, setNewBL] = useState({ name: "", code: "", description: "" });
 
+  // Nuevo estado para perfil laboral
+  const [showNewProfile, setShowNewProfile] = useState(false);
+  const [newProfile, setNewProfile] = useState({
+    profile_name: "",
+    profile_type: "Operativo",
+    base_salary_monthly: 0,
+    eps_pct: 8.5,
+    pension_pct: 12.0,
+    arl_pct: 0.522,
+    cesantias_pct: 8.33,
+    prima_pct: 8.33,
+    vacaciones_pct: 4.17,
+    intereses_cesantias_pct: 1.0,
+    ccf_pct: 4.0,
+    sena_pct: 0.0,
+    icbf_pct: 0.0,
+    transport_subsidy: 162000
+  });
+
   const loadAllData = useCallback(async () => {
     setLoading(true);
-    const [mat, routes, v, l, ind, bl] = await Promise.all([
-      getMaterialsCatalog(), getLaborRoutes(), getVehicles(), getLaborProvisions(), getIndirectCosts(), getBusinessLines()
+    const [mat, routes, v, l, profiles, ind, bl] = await Promise.all([
+      getMaterialsCatalog(), 
+      getLaborRoutes(), 
+      getVehicles(), 
+      getLaborProvisions(), 
+      getLaborProfiles(),
+      getIndirectCosts(), 
+      getBusinessLines()
     ]);
     setData({
-      materials: mat.data || [], laborRoutes: routes.data || [], vehicles: v.data || [],
-      labor: l.data || [], indirect: ind.data || [], businessLines: bl.data || []
+      materials: mat.data || [], 
+      laborRoutes: routes.data || [], 
+      vehicles: v.data || [],
+      labor: l.data || [], 
+      laborProfiles: profiles.data || [],
+      indirect: ind.data || [], 
+      businessLines: bl.data || []
     });
     setLoading(false);
   }, []);
@@ -159,6 +190,34 @@ export default function PricingAdminPage() {
     setSaving(null);
   };
 
+  const handleCreateProfile = async () => {
+    setSaving("new_profile");
+    const { error } = await createLaborProfile(newProfile);
+    if (error) setMessage({ type: "error", text: error });
+    else {
+      setMessage({ type: "success", text: "Perfil laboral creado" });
+      setShowNewProfile(false);
+      setNewProfile({
+        profile_name: "",
+        profile_type: "Operativo",
+        base_salary_monthly: 0,
+        eps_pct: 8.5,
+        pension_pct: 12.0,
+        arl_pct: 0.522,
+        cesantias_pct: 8.33,
+        prima_pct: 8.33,
+        vacaciones_pct: 4.17,
+        intereses_cesantias_pct: 1.0,
+        ccf_pct: 4.0,
+        sena_pct: 0.0,
+        icbf_pct: 0.0,
+        transport_subsidy: 162000
+      });
+      loadAllData();
+    }
+    setTimeout(() => setMessage(null), 3000);
+    setSaving(null);
+  };
 
   const formatCurrency = (amount: number) => 
     new Intl.NumberFormat("es-CO", { style: "currency", currency: "COP", minimumFractionDigits: 0 }).format(amount);
@@ -257,18 +316,91 @@ export default function PricingAdminPage() {
                           <h3 className="text-sm font-bold text-gray-800 mb-2 uppercase border-b pb-1">{category}</h3>
                           <div className="space-y-2">
                             {items.map((m: any) => (
-                              <div key={m.id} className="flex justify-between items-center p-3 bg-gray-50 rounded-xl border border-gray-100">
-                                <div>
-                                  <p className="font-bold text-gray-800 text-sm">{m.name}</p>
-                                  <p className="text-xs text-gray-500">Unidad: {m.unit_measure}</p>
-                                </div>
-                                <div className="flex items-center space-x-4">
-                                  <div className="text-right">
-                                    <p className="text-[10px] font-bold text-gray-400 uppercase">Costo</p>
-                                    <input type="number" defaultValue={m.cost_per_unit} onBlur={(e) => handleUpdate("material", m.id, { cost_per_unit: parseFloat(e.target.value) }, updateMaterial)} className="w-24 p-1.5 border rounded text-sm font-bold text-right text-black bg-white" />
+                              <div key={m.id} className="p-3 bg-gray-50 rounded-xl border border-gray-100 flex flex-col space-y-2">
+                                <div className="flex justify-between items-center">
+                                  <div>
+                                    <p className="font-bold text-gray-800 text-sm">{m.name}</p>
+                                    <p className="text-xs text-gray-500">Unidad: {m.unit_measure}</p>
                                   </div>
-                                  <div className="w-8 flex justify-center">{saving === m.id ? <Loader2 className="h-4 w-4 animate-spin text-orange-500" /> : <Save className="h-4 w-4 text-gray-300" />}</div>
+                                  <div className="flex items-center space-x-4">
+                                    <div className="text-right">
+                                      <p className="text-[10px] font-bold text-gray-400 uppercase">Costo</p>
+                                      <input type="number" defaultValue={m.cost_per_unit} onBlur={(e) => handleUpdate("material", m.id, { cost_per_unit: parseFloat(e.target.value) }, updateMaterial)} className="w-24 p-1.5 border rounded text-sm font-bold text-right text-black bg-white" />
+                                    </div>
+                                    <div className="w-8 flex justify-center">{saving === m.id ? <Loader2 className="h-4 w-4 animate-spin text-orange-500" /> : <Save className="h-4 w-4 text-gray-300" />}</div>
+                                  </div>
                                 </div>
+
+                                {category === "Empaque" && (
+                                  <div className="mt-2 text-xs border-t pt-2 border-gray-200">
+                                    <span className="font-bold text-gray-600 block mb-1">Dependencias automáticas de insumo:</span>
+                                    {m.dependencies && m.dependencies.length > 0 ? (
+                                      <div className="flex flex-wrap gap-2 items-center mb-2">
+                                        {m.dependencies.map((dep: any, idx: number) => (
+                                          <span key={idx} className="bg-orange-50 border border-orange-200 text-orange-700 px-2 py-0.5 rounded flex items-center gap-1">
+                                            {dep.material_name} ({dep.quantity_ratio}x)
+                                            <button 
+                                              type="button"
+                                              onClick={() => {
+                                                const newDeps = m.dependencies.filter((_: any, i: number) => i !== idx);
+                                                handleUpdate("material", m.id, { dependencies: newDeps.length > 0 ? newDeps : null }, updateMaterial);
+                                              }}
+                                              className="hover:text-red-500 font-bold ml-1"
+                                              title="Eliminar dependencia"
+                                            >
+                                              ×
+                                            </button>
+                                          </span>
+                                        ))}
+                                      </div>
+                                    ) : (
+                                      <span className="text-gray-400 italic block mb-2">Sin dependencias configuradas</span>
+                                    )}
+                                    
+                                    <div className="flex gap-2 items-center flex-wrap">
+                                      <select 
+                                        id={`dep-select-${m.id}`} 
+                                        className="text-[11px] p-1 border rounded bg-white text-black max-w-xs"
+                                        defaultValue=""
+                                      >
+                                        <option value="" disabled>Vincular otro material...</option>
+                                        {data.materials
+                                          .filter((mat: any) => mat.id !== m.id)
+                                          .map((mat: any) => (
+                                            <option key={mat.id} value={mat.name}>{mat.name}</option>
+                                          ))
+                                        }
+                                      </select>
+                                      <input 
+                                        id={`dep-ratio-${m.id}`} 
+                                        type="number" 
+                                        step="0.01" 
+                                        placeholder="Ratio" 
+                                        className="w-16 text-[11px] p-1 border rounded text-black bg-white" 
+                                        defaultValue="1.0"
+                                      />
+                                      <button 
+                                        type="button"
+                                        onClick={() => {
+                                          const selectEl = document.getElementById(`dep-select-${m.id}`) as HTMLSelectElement;
+                                          const ratioEl = document.getElementById(`dep-ratio-${m.id}`) as HTMLInputElement;
+                                          const matName = selectEl.value;
+                                          const ratio = parseFloat(ratioEl.value) || 1.0;
+                                          if (matName) {
+                                            const currentDeps = m.dependencies || [];
+                                            const newDeps = [...currentDeps, { material_name: matName, quantity_ratio: ratio }];
+                                            handleUpdate("material", m.id, { dependencies: newDeps }, updateMaterial);
+                                            selectEl.value = "";
+                                            ratioEl.value = "1.0";
+                                          }
+                                        }}
+                                        className="bg-gray-800 text-white px-2 py-1 rounded text-[10px] font-bold hover:bg-gray-700 transition-colors"
+                                      >
+                                        Vincular
+                                      </button>
+                                    </div>
+                                  </div>
+                                )}
                               </div>
                             ))}
                           </div>
@@ -358,19 +490,209 @@ export default function PricingAdminPage() {
 
                 {/* LABOR */}
                 {activeTab === "labor" && (
-                  <div className="space-y-4">
-                    {data.labor.map((l: any) => (
-                      <div key={l.id} className="p-4 bg-gray-50 rounded-xl border border-gray-100 space-y-4">
-                        <h3 className="font-bold text-gray-800">{l.category}</h3>
-                        <div className="grid grid-cols-4 gap-4">
-                          <div><label className="text-[10px] font-bold text-gray-400 uppercase text-black">Salario Base</label><input type="number" defaultValue={l.base_salary} onBlur={(e) => handleUpdate("labor", l.id, { base_salary: parseFloat(e.target.value) }, updateLaborProvision)} className="w-full p-2 border rounded-lg text-sm text-black" /></div>
-                          <div><label className="text-[10px] font-bold text-gray-400 uppercase text-black">Cesantías</label><input type="number" defaultValue={l.cesantias} onBlur={(e) => handleUpdate("labor", l.id, { cesantias: parseFloat(e.target.value) }, updateLaborProvision)} className="w-full p-2 border rounded-lg text-sm text-black" /></div>
-                          <div><label className="text-[10px] font-bold text-gray-400 uppercase text-black">EPS</label><input type="number" defaultValue={l.eps} onBlur={(e) => handleUpdate("labor", l.id, { eps: parseFloat(e.target.value) }, updateLaborProvision)} className="w-full p-2 border rounded-lg text-sm text-black" /></div>
-                          <div><label className="text-[10px] font-bold text-gray-400 uppercase text-black">Transporte</label><input type="number" defaultValue={l.transport_subsidy} onBlur={(e) => handleUpdate("labor", l.id, { transport_subsidy: parseFloat(e.target.value) }, updateLaborProvision)} className="w-full p-2 border rounded-lg text-sm text-black" /></div>
-                        </div>
-                        <div className="flex justify-end text-xs text-gray-400">{saving === l.id && <Loader2 className="h-3 w-3 animate-spin mr-1 text-orange-500"/>} Autoguardado</div>
+                  <div className="space-y-6">
+                    <div className="flex justify-between items-center">
+                      <div>
+                        <h3 className="text-lg font-bold text-gray-800">Perfiles Laborales V2</h3>
+                        <p className="text-xs text-gray-500">Defina los salarios, subsidios y factores parafiscales de ley por cargo.</p>
                       </div>
-                    ))}
+                      <button onClick={() => setShowNewProfile(!showNewProfile)} className="bg-[#F97316] text-white px-3 py-1.5 rounded-lg text-sm font-bold flex items-center gap-1 hover:bg-orange-600 transition-colors">
+                        <Plus className="h-4 w-4" /> Nuevo Perfil
+                      </button>
+                    </div>
+
+                    {showNewProfile && (
+                      <div className="bg-orange-50 border border-orange-200 rounded-xl p-4 space-y-4">
+                        <h4 className="font-bold text-orange-800 text-sm">Crear Nuevo Perfil Laboral</h4>
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                          <div>
+                            <label className="text-[10px] font-bold text-orange-600 uppercase block mb-1">Nombre del Perfil</label>
+                            <input type="text" placeholder="Ej. Operario Extrusora" value={newProfile.profile_name} onChange={e => setNewProfile({...newProfile, profile_name: e.target.value})} className="w-full p-2 border rounded-lg text-sm bg-white text-black" />
+                          </div>
+                          <div>
+                            <label className="text-[10px] font-bold text-orange-600 uppercase block mb-1">Tipo de Perfil</label>
+                            <select value={newProfile.profile_type} onChange={e => setNewProfile({...newProfile, profile_type: e.target.value})} className="w-full p-2 border rounded-lg text-sm bg-white text-black">
+                              <option value="Operativo">Operativo</option>
+                              <option value="Administrativo">Administrativo</option>
+                              <option value="Gerencial">Gerencial</option>
+                              <option value="Prestación de Servicios">Prestación de Servicios</option>
+                            </select>
+                          </div>
+                          <div>
+                            <label className="text-[10px] font-bold text-orange-600 uppercase block mb-1">Salario Base Mensual</label>
+                            <input type="number" placeholder="Ej. 1300000" value={newProfile.base_salary_monthly} onChange={e => setNewProfile({...newProfile, base_salary_monthly: parseFloat(e.target.value) || 0})} className="w-full p-2 border rounded-lg text-sm bg-white text-black font-bold" />
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 gap-3">
+                          <div>
+                            <label className="text-[10px] font-bold text-gray-500 uppercase block mb-0.5">Aux. Transporte</label>
+                            <input type="number" value={newProfile.transport_subsidy} onChange={e => setNewProfile({...newProfile, transport_subsidy: parseFloat(e.target.value) || 0})} className="w-full p-1.5 border rounded text-xs bg-white text-black" />
+                          </div>
+                          <div>
+                            <label className="text-[10px] font-bold text-gray-500 uppercase block mb-0.5">EPS (%)</label>
+                            <input type="number" step="0.01" value={newProfile.eps_pct} onChange={e => setNewProfile({...newProfile, eps_pct: parseFloat(e.target.value) || 0})} className="w-full p-1.5 border rounded text-xs bg-white text-black" />
+                          </div>
+                          <div>
+                            <label className="text-[10px] font-bold text-gray-500 uppercase block mb-0.5">Pensión (%)</label>
+                            <input type="number" step="0.01" value={newProfile.pension_pct} onChange={e => setNewProfile({...newProfile, pension_pct: parseFloat(e.target.value) || 0})} className="w-full p-1.5 border rounded text-xs bg-white text-black" />
+                          </div>
+                          <div>
+                            <label className="text-[10px] font-bold text-gray-500 uppercase block mb-0.5">ARL (%)</label>
+                            <input type="number" step="0.001" value={newProfile.arl_pct} onChange={e => setNewProfile({...newProfile, arl_pct: parseFloat(e.target.value) || 0})} className="w-full p-1.5 border rounded text-xs bg-white text-black" />
+                          </div>
+                          <div>
+                            <label className="text-[10px] font-bold text-gray-500 uppercase block mb-0.5">Cesantías (%)</label>
+                            <input type="number" step="0.01" value={newProfile.cesantias_pct} onChange={e => setNewProfile({...newProfile, cesantias_pct: parseFloat(e.target.value) || 0})} className="w-full p-1.5 border rounded text-xs bg-white text-black" />
+                          </div>
+                          <div>
+                            <label className="text-[10px] font-bold text-gray-500 uppercase block mb-0.5">Prima (%)</label>
+                            <input type="number" step="0.01" value={newProfile.prima_pct} onChange={e => setNewProfile({...newProfile, prima_pct: parseFloat(e.target.value) || 0})} className="w-full p-1.5 border rounded text-xs bg-white text-black" />
+                          </div>
+                          <div>
+                            <label className="text-[10px] font-bold text-gray-500 uppercase block mb-0.5">Vacaciones (%)</label>
+                            <input type="number" step="0.01" value={newProfile.vacaciones_pct} onChange={e => setNewProfile({...newProfile, vacaciones_pct: parseFloat(e.target.value) || 0})} className="w-full p-1.5 border rounded text-xs bg-white text-black" />
+                          </div>
+                          <div>
+                            <label className="text-[10px] font-bold text-gray-500 uppercase block mb-0.5">Int. Cesantías (%)</label>
+                            <input type="number" step="0.01" value={newProfile.intereses_cesantias_pct} onChange={e => setNewProfile({...newProfile, intereses_cesantias_pct: parseFloat(e.target.value) || 0})} className="w-full p-1.5 border rounded text-xs bg-white text-black" />
+                          </div>
+                          <div>
+                            <label className="text-[10px] font-bold text-gray-500 uppercase block mb-0.5">CCF (%)</label>
+                            <input type="number" step="0.01" value={newProfile.ccf_pct} onChange={e => setNewProfile({...newProfile, ccf_pct: parseFloat(e.target.value) || 0})} className="w-full p-1.5 border rounded text-xs bg-white text-black" />
+                          </div>
+                          <div>
+                            <label className="text-[10px] font-bold text-gray-500 uppercase block mb-0.5">SENA (%)</label>
+                            <input type="number" step="0.01" value={newProfile.sena_pct} onChange={e => setNewProfile({...newProfile, sena_pct: parseFloat(e.target.value) || 0})} className="w-full p-1.5 border rounded text-xs bg-white text-black" />
+                          </div>
+                          <div>
+                            <label className="text-[10px] font-bold text-gray-500 uppercase block mb-0.5">ICBF (%)</label>
+                            <input type="number" step="0.01" value={newProfile.icbf_pct} onChange={e => setNewProfile({...newProfile, icbf_pct: parseFloat(e.target.value) || 0})} className="w-full p-1.5 border rounded text-xs bg-white text-black" />
+                          </div>
+                        </div>
+
+                        <div className="flex justify-end gap-2 pt-2 border-t border-orange-200">
+                          <button onClick={() => { setShowNewProfile(false); }} className="bg-gray-200 hover:bg-gray-300 text-gray-700 px-3 py-1.5 rounded-lg text-xs font-bold">
+                            Cancelar
+                          </button>
+                          <button onClick={handleCreateProfile} disabled={saving === "new_profile" || !newProfile.profile_name} className="bg-green-500 hover:bg-green-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 disabled:opacity-50">
+                            {saving === "new_profile" ? <Loader2 className="h-4 w-4 animate-spin" /> : "Guardar Perfil"}
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="space-y-4">
+                      {data.laborProfiles && data.laborProfiles.map((p: any) => {
+                        // Cálculo en vivo
+                        const sumPcts = (p.eps_pct || 0) + (p.pension_pct || 0) + (p.arl_pct || 0) + (p.cesantias_pct || 0) + (p.prima_pct || 0) + (p.vacaciones_pct || 0) + (p.intereses_cesantias_pct || 0) + (p.ccf_pct || 0) + (p.sena_pct || 0) + (p.icbf_pct || 0);
+                        const monthlyCost = p.profile_type === "Prestación de Servicios"
+                          ? (p.base_salary_monthly || 0)
+                          : (p.base_salary_monthly || 0) * (1 + sumPcts / 100) + (p.transport_subsidy || 0);
+                        const hourlyRate = monthlyCost / 160;
+
+                        return (
+                          <div key={p.id} className="p-4 bg-gray-50 rounded-xl border border-gray-100 space-y-4">
+                            <div className="flex justify-between items-center border-b pb-2">
+                              <div>
+                                <span className="font-bold text-gray-800 text-sm mr-2">{p.profile_name}</span>
+                                <span className="bg-gray-200 text-gray-700 px-2 py-0.5 rounded text-[10px] font-bold uppercase">{p.profile_type}</span>
+                              </div>
+                              <div className="w-8 flex justify-center">{saving === p.id ? <Loader2 className="h-4 w-4 animate-spin text-orange-500" /> : <Save className="h-4 w-4 text-gray-300" />}</div>
+                            </div>
+
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                              <div>
+                                <label className="text-[10px] font-bold text-gray-400 uppercase block mb-1">Salario Base Mensual</label>
+                                <input 
+                                  type="number" 
+                                  defaultValue={p.base_salary_monthly} 
+                                  onBlur={(e) => handleUpdate("laborProfile", p.id, { base_salary_monthly: parseFloat(e.target.value) || 0 }, updateLaborProfile)} 
+                                  className="w-full p-2 border rounded-lg text-sm bg-white text-black font-bold" 
+                                />
+                              </div>
+                              <div>
+                                <label className="text-[10px] font-bold text-gray-400 uppercase block mb-1">Aux. Transporte</label>
+                                <input 
+                                  type="number" 
+                                  defaultValue={p.transport_subsidy} 
+                                  onBlur={(e) => handleUpdate("laborProfile", p.id, { transport_subsidy: parseFloat(e.target.value) || 0 }, updateLaborProfile)} 
+                                  className="w-full p-2 border rounded-lg text-sm bg-white text-black" 
+                                />
+                              </div>
+                              <div>
+                                <label className="text-[10px] font-bold text-gray-400 uppercase block mb-1">Tipo de Cargo</label>
+                                <select 
+                                  value={p.profile_type} 
+                                  onChange={(e) => handleUpdate("laborProfile", p.id, { profile_type: e.target.value }, updateLaborProfile)} 
+                                  className="w-full p-2 border rounded-lg text-sm bg-white text-black"
+                                >
+                                  <option value="Operativo">Operativo</option>
+                                  <option value="Administrativo">Administrativo</option>
+                                  <option value="Gerencial">Gerencial</option>
+                                  <option value="Prestación de Servicios">Prestación de Servicios</option>
+                                </select>
+                              </div>
+                            </div>
+
+                            {p.profile_type !== "Prestación de Servicios" && (
+                              <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-8 gap-2 bg-white p-3 rounded-lg border border-gray-200">
+                                <div>
+                                  <label className="text-[9px] font-bold text-gray-400 uppercase block mb-0.5">EPS (%)</label>
+                                  <input type="number" step="0.01" defaultValue={p.eps_pct} onBlur={(e) => handleUpdate("laborProfile", p.id, { eps_pct: parseFloat(e.target.value) || 0 }, updateLaborProfile)} className="w-full p-1 border rounded text-xs bg-gray-50 text-black text-right" />
+                                </div>
+                                <div>
+                                  <label className="text-[9px] font-bold text-gray-400 uppercase block mb-0.5">Pensión (%)</label>
+                                  <input type="number" step="0.01" defaultValue={p.pension_pct} onBlur={(e) => handleUpdate("laborProfile", p.id, { pension_pct: parseFloat(e.target.value) || 0 }, updateLaborProfile)} className="w-full p-1 border rounded text-xs bg-gray-50 text-black text-right" />
+                                </div>
+                                <div>
+                                  <label className="text-[9px] font-bold text-gray-400 uppercase block mb-0.5">ARL (%)</label>
+                                  <input type="number" step="0.001" defaultValue={p.arl_pct} onBlur={(e) => handleUpdate("laborProfile", p.id, { arl_pct: parseFloat(e.target.value) || 0 }, updateLaborProfile)} className="w-full p-1 border rounded text-xs bg-gray-50 text-black text-right" />
+                                </div>
+                                <div>
+                                  <label className="text-[9px] font-bold text-gray-400 uppercase block mb-0.5">Cesantías (%)</label>
+                                  <input type="number" step="0.01" defaultValue={p.cesantias_pct} onBlur={(e) => handleUpdate("laborProfile", p.id, { cesantias_pct: parseFloat(e.target.value) || 0 }, updateLaborProfile)} className="w-full p-1 border rounded text-xs bg-gray-50 text-black text-right" />
+                                </div>
+                                <div>
+                                  <label className="text-[9px] font-bold text-gray-400 uppercase block mb-0.5">Prima (%)</label>
+                                  <input type="number" step="0.01" defaultValue={p.prima_pct} onBlur={(e) => handleUpdate("laborProfile", p.id, { prima_pct: parseFloat(e.target.value) || 0 }, updateLaborProfile)} className="w-full p-1 border rounded text-xs bg-gray-50 text-black text-right" />
+                                </div>
+                                <div>
+                                  <label className="text-[9px] font-bold text-gray-400 uppercase block mb-0.5">Vacac. (%)</label>
+                                  <input type="number" step="0.01" defaultValue={p.vacaciones_pct} onBlur={(e) => handleUpdate("laborProfile", p.id, { vacaciones_pct: parseFloat(e.target.value) || 0 }, updateLaborProfile)} className="w-full p-1 border rounded text-xs bg-gray-50 text-black text-right" />
+                                </div>
+                                <div>
+                                  <label className="text-[9px] font-bold text-gray-400 uppercase block mb-0.5">CCF (%)</label>
+                                  <input type="number" step="0.01" defaultValue={p.ccf_pct} onBlur={(e) => handleUpdate("laborProfile", p.id, { ccf_pct: parseFloat(e.target.value) || 0 }, updateLaborProfile)} className="w-full p-1 border rounded text-xs bg-gray-50 text-black text-right" />
+                                </div>
+                                <div>
+                                  <label className="text-[9px] font-bold text-gray-400 uppercase block mb-0.5">Sena/ICBF (%)</label>
+                                  <div className="flex gap-1">
+                                    <input type="number" step="0.01" defaultValue={p.sena_pct} onBlur={(e) => handleUpdate("laborProfile", p.id, { sena_pct: parseFloat(e.target.value) || 0 }, updateLaborProfile)} placeholder="Sena" className="w-full p-1 border rounded text-xs bg-gray-50 text-black text-right" title="Sena" />
+                                    <input type="number" step="0.01" defaultValue={p.icbf_pct} onBlur={(e) => handleUpdate("laborProfile", p.id, { icbf_pct: parseFloat(e.target.value) || 0 }, updateLaborProfile)} placeholder="ICBF" className="w-full p-1 border rounded text-xs bg-gray-50 text-black text-right" title="ICBF" />
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+
+                            {/* LIVE PREVIEW OF CALCULATIONS */}
+                            <div className="flex flex-wrap justify-between items-center p-3 bg-orange-50 border border-orange-100 rounded-lg text-xs">
+                              <div>
+                                <span className="text-gray-500">Recargos Ley: </span>
+                                <span className="font-bold text-orange-700">+{sumPcts.toFixed(3)}%</span>
+                              </div>
+                              <div>
+                                <span className="text-gray-500">Costo Mensual Empresa: </span>
+                                <span className="font-bold text-[#1F2937]">{formatCurrency(monthlyCost)}</span>
+                              </div>
+                              <div className="bg-[#1F2937] text-white px-2 py-1 rounded text-[11px] font-bold">
+                                Costo Hora MOD: {formatCurrency(hourlyRate)}/h
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
                 )}
 

@@ -92,48 +92,66 @@ cencore-app/
 
 ### Entidades de Configuración de Precios
 
-| Tabla | Descripción |
-|---|---|
-| `pricing_labor_rates` | Costo de mano de obra por hora según categoría |
-| `pricing_material_costs` | Costo por KG de materias primas (papel kraft, corrugado, etc.) |
-| `pricing_product_configs` | Velocidad de máquina y tasa CIF por tipo de producto |
-| `pricing_indirect_costs` | Costos fijos mensuales con vigencia: arriendo, servicios, administración, mantenimiento, nómina, otros |
-| `pricing_references` | Multiplicador MOD, factor desperdicio, tiempo alistamiento |
-| `papers` | Tipos de papel disponibles para el planificador (nombre, gramaje) |
-| `glues` | Tipos de pegante disponibles |
+| Tabla                       | Descripción                                                                                                                                                          |
+| -----------------------------| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `pricing_labor_profiles`    | Perfiles laborales dinámicos con salario base mensual, recargos/factores parafiscales (EPS, Pensión, ARL, Cesantías, Prima, Vacaciones, CCF) y auxilio de transporte |
+| `pricing_materials_catalog` | Catálogo centralizado de materiales e insumos (Papel, Corrugado, Pegante, Accesorio, Empaque) con columna `dependencies` (JSONB) para enlazar insumos dependientes   |
+| `pricing_labor_routes`      | Velocidades nominales (unidades/hora) y tiempos de alistamiento (setup_hours) por proceso de fabricación                                                             |
+| `pricing_logistics`         | Flota de vehículos de despacho con volumen útil en m³ y costo de flete asociado                                                                                      |
+| `pricing_indirect_costs`    | Costos fijos y variables mensuales (vigentes por rango de fechas) para cálculo de tasa NIF / CIF variable                                                            |
+| `pricing_labor_provisions`  | (Legacy) Provisiones de nómina estáticas usadas como fallback                                                                                                        |
 
 ---
 
 ## 6. Motor de Precios (FastAPI — `engine.py`)
 
-### Categorías Soportadas
-`Tubos` · `Esquineros` · `Cajas` · `Láminas` · `Single face`
+El motor de precios de Cencore implementa la arquitectura **V2 con Estado de Resultados Proyectado**, soportando las siguientes reglas de negocio:
 
-### Cálculo de Peso por Categoría
+### 1. Liquidación Laboral Dinámica (MOD)
 
-| Categoría | Fórmula |
-|---|---|
-| Tubos | `Área transversal tubular × longitud × 0.0006` |
-| Esquineros | `Superficie en "L" (alas × grosor) × longitud × 0.0006` |
-| Cajas | `Área superficie exterior × 0.5 × 0.0006` |
-| Láminas | `Área plana × 0.1 × 0.0006` |
-| Single face | `Área plana × 0.0004` |
+El costo de mano de obra directa para cada operación del ruteo se liquida dinámicamente según el perfil laboral seleccionado:
 
-### Composición del Costo Total
+- **Costo Mensual**: $S_{mensual} = \text{base\_salary} \times (1 + \sum \text{parafiscales\_pct}) + \text{transport\_subsidy}$
+- **Valor Hora**: $\text{rate\_hr} = S_{mensual} / 160$
+- **MOD Step**: $\text{step\_hours} \times \text{rate\_hr} \times \text{operator\_count}$
 
-```
-1. Materias Primas   = Peso_unitario × Costo_material_KG × Cantidad × Factor_desperdicio
-2. MOD               = (Cantidad / Velocidad_máquina + T_alistamiento) × Multiplicador × Tarifa_hora
-3. CIF               = MOD × Tasa_sobrecosto
-4. NIF               = Total_NIF_mensual × (Horas_producción / 160h)
-─────────────────────────────────────────────────────────────────
-   Costo Total       = Materias Primas + MOD + CIF + NIF
-   Ganancia (25%)    = Costo Total × 0.25
-   Precio de Venta   = Costo Total + Ganancia
-   Precio Unitario   = Precio de Venta / Cantidad
-```
+### 2. Desperdicio / Refile Condicional
 
-> Cualquier cambio en costos (arriendo, energía, mano de obra) se actualiza en el panel de administrador → impacta en tiempo real todos los cálculos futuros.
+Para `Tubos` y `Envases`, se añade un factor de desperdicio (`waste_pct`) configurable por el usuario. Multiplica directamente el costo final de las materias primas (papel y pegante):
+
+- $\text{Costo Papeles y Pegantes} \times (1 + \text{waste\_pct} / 100)$
+
+### 3. Cubicación Volumétrica de Empaques (Cajas)
+
+Si el insumo de empaque secundario contiene dimensiones en su nombre (ej: `Caja 420x420x600`), el motor calcula automáticamente la cantidad requerida para `Tubos` y `Envases`:
+
+- $V_{tubo} = \pi \times (\frac{\text{diámetro\_ext}}{2})^2 \times \text{largo}$
+- $V_{caja} = \text{largo} \times \text{ancho} \times \text{alto}$
+- $\text{unidades\_por\_caja} = \lfloor V_{caja} / V_{tubo} \rfloor$
+- $\text{cajas\_totales} = \lceil \text{cantidad\_solicitada} / \text{unidades\_por\_caja} \rceil$
+
+### 4. Dependencias Automáticas de Insumos
+
+Si un insumo seleccionado en empaque (ej: `Zuncho`) tiene dependencias configuradas en la base de datos (ej: `[{"material_name": "Grapas para Zuncho", "quantity_ratio": 1.0}]`), el motor de precios carga y totaliza automáticamente el costo del insumo dependiente.
+
+### 5. Selección de Vehículo Óptimo con Tolerancia
+
+Al calcular el flete, el motor añade una tolerancia de $10\text{mm}$ al largo y al diámetro exterior de los tubos/envases antes de estimar el volumen de despacho total. Asigna automáticamente el camión más económico donde quepa la carga; si sobrepasa el vehículo más grande, calcula múltiplos del mismo.
+
+### 6. Estructura del Estado de Resultados (Income Statement)
+
+El motor de precios retorna un objeto estructurado con las siguientes relaciones matemáticas exactas:
+
+- **Venta Total** = Precio de venta final cotizado (con el margen deseado)
+- **Costo Materia Prima** = Materias primas directas + Accesorios + Insumos de Empaque
+- **Utilidad Bruta** = Venta Total - Costo Materia Prima
+- **Gastos Operacionales** = Costos Indirectos (NIF) + Fletes de Despacho
+- **Carga Fabril CIF** = Costos Indirectos Variables (CIF)
+- **Mano de Obra** = Costo de Mano de Obra Directa (MOD) liquidada
+- **Utilidad Operacional (EBIT)** = Utilidad Bruta - Gastos Operacionales - Carga Fabril CIF - Mano de Obra
+- **Impuesto de Renta** = Utilidad Operacional × 35% (si la utilidad es positiva, de lo contrario 0)
+- **Rentabilidad Neta del Ejercicio** = Utilidad Operacional - Impuesto de Renta
+- **Porcentaje de Rentabilidad** = (Rentabilidad Neta / Venta Total) × 100
 
 ---
 
@@ -187,6 +205,7 @@ draft ──→ sent ──→ approved
 ## 9. Integración n8n (Envío de Email)
 
 ### Workflow activo en n8n Cloud
+
 - **URL workflow editor:** `https://jkmilo8.app.n8n.cloud/workflow/VIYwruF8YaXtFPmO`
 - **Webhook production URL:** `https://jkmilo8.app.n8n.cloud/webhook/cencore-quotes`
 - **Nodos:** `Webhook (POST)` → `Send an Email` *(el nodo "Respond to Webhook" debe eliminarse o estar conectado al final)*
@@ -222,11 +241,13 @@ draft ──→ sent ──→ approved
 ```
 
 ### Comportamiento del código
+
 - Si n8n responde `200 OK` → cotización marcada como `sent` ✓
 - Si n8n retorna error `"Unused Respond to Webhook"` → se trata como éxito igual (el email SÍ se envía, es un warning de configuración de n8n)
 - Si error real de red → toast rojo con mensaje descriptivo
 
 ### Probar el webhook manualmente (PowerShell)
+
 ```powershell
 $body = @{ quote_number = "QT-TEST"; client = @{ email = "jkmilo8@gmail.com"; name = "Test" }; total = 100000 } | ConvertTo-Json
 Invoke-RestMethod -Uri "https://jkmilo8.app.n8n.cloud/webhook/cencore-quotes" -Method POST -ContentType "application/json" -Body $body
@@ -239,12 +260,14 @@ Invoke-RestMethod -Uri "https://jkmilo8.app.n8n.cloud/webhook/cencore-quotes" -M
 Se usa `window.print()` nativo del browser desde el botón "Imprimir / PDF" en el detalle de cotización.
 
 ### CSS `@media print` en `globals.css`
+
 - Clase `.no-print` → `display: none !important` (oculta sidebar, header, botones de acción)
 - Clase `.print-only` → `display: flex !important` (muestra encabezado corporativo solo en impresión)
 - `@page { size: A4; margin: 1.5cm; }`
 - `-webkit-print-color-adjust: exact` para colores corporativos
 
 ### Componentes con clase `no-print`
+
 - `components/layout/Sidebar.tsx` → div raíz
 - `app/admin/layout.tsx` → wrapper de `<Sidebar>` y `<Header>`
 - `app/admin/quotes/[id]/page.tsx` → div de botones de acción
@@ -263,14 +286,15 @@ El módulo `/admin/products` es un **catálogo de referencia visual**, no un inv
 
 ---
 
-## 12. Bugs Corregidos (Historial)
+## 12. Bugs Corregidos e Historial de Cambios
 
-| Bug | Causa | Fix |
+| Hito / Bug | Causa / Requerimiento | Fix / Implementación |
 |---|---|---|
 | Al añadir ítem, redirigía a cotización generada | Botones sin `type="button"` dentro de `<form>` | Añadido `type="button"` a "Calcular", "Añadir Ítem" y todos los botones de selección de papeles en `PricingCalculator.tsx` |
 | Sidebar aparecía en impresión | Div del Sidebar no tenía clase `no-print` | Añadida clase `no-print` al div raíz de `Sidebar.tsx` y wrappers en `layout.tsx` |
 | Error n8n `Cannot POST /workflow/...` | URL del editor usada en lugar de URL del webhook | Corregido: usar `/webhook/cencore-quotes` no `/workflow/VIYwruF8YaXtFPmO` |
 | Error n8n `Unused Respond to Webhook` | Nodo desconectado en workflow | Manejado en código como warning no-fatal; el email se envía igual |
+| **Actualización Precios V2 e Income Statement** | Implementar las 10 reglas de negocio exactas de Cencore (MOD dinámico, desperdicio, flete con tolerancia, cubicación de cajas, dependencias de empaque y Estado de Resultados) | Modificado microservicio FastAPI (`engine.py`, `models.py`) y frontend Next.js (`PricingCalculator.tsx`, `pricing_config.ts`). Migrado el esquema en Supabase vía MCP. |
 
 ---
 

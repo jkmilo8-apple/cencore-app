@@ -76,6 +76,27 @@ export async function getLogistics() {
   return { data, error: error?.message };
 }
 
+// ─── LABOR PROFILES ────────────────────────────────────────────────
+export async function getLaborProfiles() {
+  const supabase = await createClient();
+  const { data, error } = await supabase.from("pricing_labor_profiles").select("*").eq("active", true).order("profile_name");
+  return { data, error: error?.message };
+}
+
+export async function createLaborProfile(profileData: any) {
+  const supabase = await createClient();
+  const { error } = await supabase.from("pricing_labor_profiles").insert(profileData);
+  if (!error) revalidatePath("/admin/costs");
+  return { error: error?.message };
+}
+
+export async function updateLaborProfile(id: string, updates: any) {
+  const supabase = await createClient();
+  const { error } = await supabase.from("pricing_labor_profiles").update({ ...updates, updated_at: new Date().toISOString() }).eq("id", id);
+  if (!error) revalidatePath("/admin/costs");
+  return { error: error?.message };
+}
+
 
 // ───────────────────────────────────────────────────────────────────
 // LEGACY V1 FUNCTIONS (Retained for /admin/costs backward compatibility)
