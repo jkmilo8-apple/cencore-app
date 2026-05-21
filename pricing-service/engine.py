@@ -22,6 +22,21 @@ def get_supabase() -> Client:
     )
 
 
+def get_gsm_from_name(name: str) -> float:
+    import re
+    match = re.search(r'(\d+)', name)
+    if match:
+        return float(match.group(1))
+    name_lower = name.lower()
+    if "periodico" in name_lower:
+        return 50.0
+    if "foil" in name_lower:
+        return 80.0
+    if "kraft" in name_lower:
+        return 300.0
+    return 300.0  # general fallback
+
+
 # ── Clase Base Abstracta ──────────────────────────────────────────────
 class BasePricingCalculator(ABC):
     DEFAULT_MARGIN = 0.25
@@ -259,17 +274,12 @@ class BasePricingCalculator(ABC):
         order_minutes = total_hours * 60.0
         participation = order_minutes / PLANT_CAPACITY_MINUTES
 
-        var_monthly = sum(float(i.get("amount", 0)) for i in indirect_data if i.get("cost_type") == "variable")
-        fix_monthly = sum(float(i.get("amount", 0)) for i in indirect_data if i.get("cost_type") == "fixed")
+        # Sum of all active registers regardless of fixed/variable type
+        total_indirect_monthly = sum(float(i.get("amount", 0)) for i in indirect_data)
 
-        if not var_monthly and not fix_monthly:
-            total_indirect_monthly = sum(float(i.get("amount", 0)) for i in indirect_data)
-            fix_monthly = total_indirect_monthly
-
-        # CIF variables: prorateados por participación (ej. energía, mantenimiento variable)
-        factory_overheads = var_monthly * participation
-        # NIF (costos fijos: arriendo, contador, etc.) prorateados por participación
-        indirect_costs = fix_monthly * participation
+        # The formula Suma_Total_Costos_Fijos * (Minutos_Orden / 10800) executed over the grand total of the month
+        factory_overheads = total_indirect_monthly * participation
+        indirect_costs = 0.0
 
         return {
             "direct_labor": round(direct_labor, 2),
@@ -419,26 +429,14 @@ class BasePricingCalculator(ABC):
 
 # TubosCalculator ───────────────────────────────────────────────────────────
 class TubosCalculator(BasePricingCalculator):
-    """
-    Cálculo de materias primas basado en el Área Lateral del Tubo Padre.
-    El refile se calcula automáticamente desde la Cabida y la configuración de la máquina.
-    Peso Papel = Área_m² × GMS_capa / 1000 × cantidad
-    Peso Pegante = Área_m² × GMS_pegante × capas_pegante / 1000 × cantidad
-    """
-    # Defaults de configuración de máquina (pueden sobreescribirse por request)
     DEFAULT_MARGEN_PUNTAS_MM = 10.0
     DEFAULT_GROSOR_CUCHILLA_MM = 5.0
 
-    @staticmethod
-    def _compute_refile_mm(cabida: int, margen_puntas_mm: float, grosor_cuchilla_corte_mm: float) -> float:
-        """Calcula los milímetros de refile según cabida y configuración de máquina.
-
-        Cabida == 1 (colmalla): solo margen de puntas.
-        Cabida > 1 (múltiples cortes): margen de puntas + (cabida - 1) × grosor de cuchilla.
-        """
-        if cabida <= 1:
-            return margen_puntas_mm
-        return margen_puntas_mm + (cabida - 1) * grosor_cuchilla_corte_mm
+    def _compute_refile_mm(self, cabida: int, margen_puntas: float, grosor_cuchilla: float) -> float:
+        if cabida == 1:
+            return margen_puntas
+        else:
+            return margen_puntas + (cabida - 1) * grosor_cuchilla
 
     def _compute_parent_tube_area_m2(self) -> float:
         """Calcula el área lateral del Tubo Padre en m² POR UNIDAD.
@@ -446,7 +444,7 @@ class TubosCalculator(BasePricingCalculator):
         Fórmula exacta (Excel Cencore):
           Refile = f(cabida, máquina) — automático
           Largo_Tubo_Padre_m = ((Largo_Unidad_mm × Cabida) + Refile) / 1000
-          Area_m2 = (D_ext_mm / 1000) × π × Largo_Tubo_Padre_m
+          Area_m2 = (Diametro_Interno_mm / 1000) × π × Largo_Tubo_Padre_m
         """
         d = self.req.dimensions
         diameter_mm = d.diameter_mm or (d.width_mm or 50.0)
@@ -464,14 +462,11 @@ class TubosCalculator(BasePricingCalculator):
 
         refile_mm = self._compute_refile_mm(cabida, margen_puntas, grosor_cuchilla)
 
-        # Diámetro externo en mm
-        diameter_ext_mm = diameter_mm + 2.0 * thickness_mm
-
         # Largo tubo padre en metros (incluye múltiples cortes por cabida + refile)
         largo_padre_m = ((length_mm * cabida) + refile_mm) / 1000.0
 
-        # Área lateral: D_ext(m) × π × Largo(m)
-        area_m2 = (diameter_ext_mm / 1000.0) * math.pi * largo_padre_m
+        # Área lateral utilizando Diámetro Interno (diameter_mm)
+        area_m2 = (diameter_mm / 1000.0) * math.pi * largo_padre_m
         return area_m2
 
     def calculate_materials(self) -> dict:
@@ -487,17 +482,22 @@ class TubosCalculator(BasePricingCalculator):
         if bom.layers:
             for layer in bom.layers:
                 cost_kg = self._get_material_cost(layer.material_name)
-                # GMS del papel: el campo `layer.quantity` se reutiliza como GMS/m²
-                # (Convenio: en el BOM, `quantity` de una capa = GMS del papel, ej. 168, 300, 400)
-                gms = layer.quantity  # GMS/m²
-                kg_per_unit = (area_m2_unit * gms) / 1000.0
-                raw_materials += kg_per_unit * qty * cost_kg * waste_factor
+                # Determinación robusta de GSM y cantidad de capas
+                if layer.quantity >= 50.0:
+                    gms_capa = layer.quantity
+                    numero_capas = 1.0
+                else:
+                    gms_capa = get_gsm_from_name(layer.material_name)
+                    numero_capas = layer.quantity
+                
+                peso_capa_kg = area_m2_unit * (gms_capa * numero_capas) / 1000.0
+                raw_materials += peso_capa_kg * qty * cost_kg * waste_factor
 
             # ── Pegante ───────────────────────────────────────────────
             if bom.glue_name:
                 glue_cost_kg = self._get_material_cost(bom.glue_name)
                 if bom.glue_gms and bom.glue_gms > 0 and bom.glue_layers and bom.glue_layers > 0:
-                    # Método nuevo: GMS/m² × capas de pegante × área tubo padre
+                    # GMS/m² × capas de pegante × área tubo padre
                     kg_glue_per_unit = (area_m2_unit * bom.glue_gms * bom.glue_layers) / 1000.0
                     raw_materials += kg_glue_per_unit * qty * glue_cost_kg * waste_factor
                 elif bom.glue_grams and bom.glue_grams > 0:
@@ -506,10 +506,15 @@ class TubosCalculator(BasePricingCalculator):
                     raw_materials += total_glue_kg * glue_cost_kg * waste_factor
                 else:
                     # Auto-fallback: ~10% del peso total de papel
-                    total_paper_kg = sum(
-                        (area_m2_unit * l.quantity / 1000.0) * qty
-                        for l in bom.layers
-                    )
+                    total_paper_kg = 0.0
+                    for l in bom.layers:
+                        if l.quantity >= 50.0:
+                            gms_capa = l.quantity
+                            num_layers = 1.0
+                        else:
+                            gms_capa = get_gsm_from_name(l.material_name)
+                            num_layers = l.quantity
+                        total_paper_kg += (area_m2_unit * gms_capa * num_layers / 1000.0) * qty
                     raw_materials += total_paper_kg * 0.10 * glue_cost_kg * waste_factor
             else:
                 # Sin pegante especificado: estimado en 10% del peso de papel
@@ -518,10 +523,15 @@ class TubosCalculator(BasePricingCalculator):
                     glue_cost = float(glue_res.data[0]["cost_per_unit"]) if glue_res.data else 3570
                 except Exception:
                     glue_cost = 3570
-                total_paper_kg = sum(
-                    (area_m2_unit * l.quantity / 1000.0) * qty
-                    for l in bom.layers
-                )
+                total_paper_kg = 0.0
+                for l in bom.layers:
+                    if l.quantity >= 50.0:
+                        gms_capa = l.quantity
+                        num_layers = 1.0
+                    else:
+                        gms_capa = get_gsm_from_name(l.material_name)
+                        num_layers = l.quantity
+                    total_paper_kg += (area_m2_unit * gms_capa * num_layers / 1000.0) * qty
                 raw_materials += total_paper_kg * 0.10 * glue_cost * waste_factor
 
         return {"raw_materials": round(raw_materials, 2), "accessories_cost": 0.0}
