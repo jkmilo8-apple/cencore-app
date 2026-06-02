@@ -438,51 +438,60 @@ class TubosCalculator(BasePricingCalculator):
         else:
             return margen_puntas + (cabida - 1) * grosor_cuchilla
 
+    def _get_dynamic_glue_gms(self, thickness_mm: float) -> float:
+        """Asigna automáticamente el gramaje de pegante según el espesor ingresado."""
+        if thickness_mm <= 1.8:
+            return 55.0
+        elif thickness_mm <= 2.9:
+            return 65.0
+        elif thickness_mm <= 5.0:
+            return 70.0
+        elif thickness_mm <= 7.5:
+            return 80.0
+        elif thickness_mm <= 12.0:
+            return 100.0
+        else:
+            return 120.0
+
     def _compute_parent_tube_area_m2(self) -> float:
         """Calcula el área lateral del Tubo Padre en m² POR UNIDAD.
 
-        Fórmula exacta (Excel Cencore):
-          Refile = f(cabida, máquina) — automático
-          Largo_Tubo_Padre_m = ((Largo_Unidad_mm × Cabida) + Refile) / 1000
-          Area_m2 = (Diametro_Interno_mm / 1000) × π × Largo_Tubo_Padre_m
+        Fórmula según 'Reglas Matriz tubo' (y validada por auditoría Colmallas):
+          Largo_Tubo_Padre_mm = Largo_Unidad_mm + 10
+          Area_Tubo_Padre_m2 = (Largo_Tubo_Padre_mm / 1000) * (Diametro_Interno_mm / 1000) * 3.1416
         """
         d = self.req.dimensions
         diameter_mm = d.diameter_mm or (d.width_mm or 50.0)
-        thickness_mm = d.thickness_mm or 5.0
         length_mm = d.length_mm or 100.0
 
-        # Cabida automatizada según largo unidad (máx. 2000mm)
-        max_largo_tubo_padre = 2000.0
-        cabida = math.floor(max_largo_tubo_padre / length_mm) if length_mm > 0 else 1
-        if cabida < 1:
-            cabida = 1
+        largo_tubo_padre_mm = length_mm + 10
 
-        margen_puntas = self.req.margen_puntas_mm or self.DEFAULT_MARGEN_PUNTAS_MM
-        grosor_cuchilla = self.req.grosor_cuchilla_corte_mm or self.DEFAULT_GROSOR_CUCHILLA_MM
-
-        refile_mm = self._compute_refile_mm(cabida, margen_puntas, grosor_cuchilla)
-
-        # Largo tubo padre en metros (incluye múltiples cortes por cabida + refile)
-        largo_padre_m = ((length_mm * cabida) + refile_mm) / 1000.0
-
-        # Área lateral utilizando Diámetro Interno (diameter_mm)
-        area_m2 = (diameter_mm / 1000.0) * math.pi * largo_padre_m
+        area_m2 = (largo_tubo_padre_mm / 1000.0) * (diameter_mm / 1000.0) * 3.1416
         return area_m2
 
     def calculate_materials(self) -> dict:
         bom = self.req.bom
-        waste_factor = 1.0 + (self.req.waste_pct or 0.0) / 100.0
         qty = self.req.requested_quantity
+        d = self.req.dimensions
+        thickness_mm = d.thickness_mm or 5.0
 
         # Área del tubo padre por unidad (m²)
         area_m2_unit = self._compute_parent_tube_area_m2()
 
-        raw_materials = 0.0
+        # Determinar desperdicio de tubos padres fijos (Merma)
+        if thickness_mm <= 6.0:
+            tubes_waste_qty = 35
+        else:
+            tubes_waste_qty = 45
 
+        # 1. Calcular costo de 1 Tubo Padre completo (papel + pegante para 1 unidad)
+        paper_cost_1 = 0.0
+        total_paper_kg_1 = 0.0
+        
         if bom.layers:
             for layer in bom.layers:
                 cost_kg = self._get_material_cost(layer.material_name)
-                # Determinación robusta de GSM y cantidad de capas
+                # Determinación de GSM y cantidad de capas
                 if layer.quantity >= 50.0:
                     gms_capa = layer.quantity
                     numero_capas = 1.0
@@ -491,48 +500,47 @@ class TubosCalculator(BasePricingCalculator):
                     numero_capas = layer.quantity
                 
                 peso_capa_kg = area_m2_unit * (gms_capa * numero_capas) / 1000.0
-                raw_materials += peso_capa_kg * qty * cost_kg * waste_factor
+                paper_cost_1 += peso_capa_kg * cost_kg
+                total_paper_kg_1 += peso_capa_kg
 
-            # ── Pegante ───────────────────────────────────────────────
+        # Costo de pegante para 1 tubo padre
+        glue_cost_1 = 0.0
+        if bom.layers:
             if bom.glue_name:
                 glue_cost_kg = self._get_material_cost(bom.glue_name)
-                if bom.glue_gms and bom.glue_gms > 0 and bom.glue_layers and bom.glue_layers > 0:
-                    # GMS/m² × capas de pegante × área tubo padre
-                    kg_glue_per_unit = (area_m2_unit * bom.glue_gms * bom.glue_layers) / 1000.0
-                    raw_materials += kg_glue_per_unit * qty * glue_cost_kg * waste_factor
-                elif bom.glue_grams and bom.glue_grams > 0:
-                    # Método legacy: gramos fijos por unidad
-                    total_glue_kg = (bom.glue_grams / 1000.0) * qty
-                    raw_materials += total_glue_kg * glue_cost_kg * waste_factor
+                # Asignar GMS de pegante dinámicamente según espesor, o usar el provisto
+                glue_gms = bom.glue_gms if (bom.glue_gms and bom.glue_gms > 0) else self._get_dynamic_glue_gms(thickness_mm)
+                
+                # Las capas de pegante suelen ser Capas de Papel - 1, o usar el provisto
+                if bom.glue_layers and bom.glue_layers > 0:
+                    glue_layers = bom.glue_layers
                 else:
-                    # Auto-fallback: ~10% del peso total de papel
-                    total_paper_kg = 0.0
-                    for l in bom.layers:
-                        if l.quantity >= 50.0:
-                            gms_capa = l.quantity
-                            num_layers = 1.0
-                        else:
-                            gms_capa = get_gsm_from_name(l.material_name)
-                            num_layers = l.quantity
-                        total_paper_kg += (area_m2_unit * gms_capa * num_layers / 1000.0) * qty
-                    raw_materials += total_paper_kg * 0.10 * glue_cost_kg * waste_factor
+                    total_paper_layers = sum(1.0 if l.quantity >= 50.0 else l.quantity for l in bom.layers)
+                    glue_layers = max(1.0, total_paper_layers - 1.0)
+                
+                # Fórmula final pegante: (Capas_de_Pegante * GMS_Asignado) * Area_Tubo_Padre_m2
+                kg_glue_per_unit = ((glue_layers * glue_gms) * area_m2_unit) / 1000.0
+                glue_cost_1 = kg_glue_per_unit * glue_cost_kg
             else:
-                # Sin pegante especificado: estimado en 10% del peso de papel
+                # Auto-fallback: ~10% del peso total de papel
                 try:
                     glue_res = self.db.table("pricing_materials_catalog").select("cost_per_unit").eq("category", "Pegante").limit(1).execute()
-                    glue_cost = float(glue_res.data[0]["cost_per_unit"]) if glue_res.data else 3570
+                    glue_cost_kg = float(glue_res.data[0]["cost_per_unit"]) if glue_res.data else 3570
                 except Exception:
-                    glue_cost = 3570
-                total_paper_kg = 0.0
-                for l in bom.layers:
-                    if l.quantity >= 50.0:
-                        gms_capa = l.quantity
-                        num_layers = 1.0
-                    else:
-                        gms_capa = get_gsm_from_name(l.material_name)
-                        num_layers = l.quantity
-                    total_paper_kg += (area_m2_unit * gms_capa * num_layers / 1000.0) * qty
-                raw_materials += total_paper_kg * 0.10 * glue_cost * waste_factor
+                    glue_cost_kg = 3570
+                glue_cost_1 = total_paper_kg_1 * 0.10 * glue_cost_kg
+
+        cost_1_parent_tube = paper_cost_1 + glue_cost_1
+
+        # 2. El costo total de la materia prima del pedido
+        if self.req.waste_pct and self.req.waste_pct > 0:
+            # Cálculo porcentual (legacy / auditoría Excel)
+            waste_factor = 1.0 + (self.req.waste_pct / 100.0)
+            raw_materials = qty * cost_1_parent_tube * waste_factor
+        else:
+            # Cálculo automatizado por cantidad de tubos padres perdidos
+            total_waste_cost = tubes_waste_qty * cost_1_parent_tube
+            raw_materials = (qty * cost_1_parent_tube) + total_waste_cost
 
         return {"raw_materials": round(raw_materials, 2), "accessories_cost": 0.0}
 

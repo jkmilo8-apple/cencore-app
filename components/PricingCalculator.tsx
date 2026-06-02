@@ -81,6 +81,9 @@ export default function PricingCalculator({ onAdd }: PricingCalculatorProps) {
   // Input de margen como string para soportar decimales (ej. 7.77)
   const [marginStr, setMarginStr] = useState("25");
 
+  // Estado para parámetros avanzados manuales (Mermas, consumos, etc)
+  const [showAdvanced, setShowAdvanced] = useState(false);
+
   // Estado para fletes manuales
   const [forceManualFreight, setForceManualFreight] = useState(false);
   const [manualFreightCost, setManualFreightCost] = useState("45000");
@@ -130,9 +133,39 @@ export default function PricingCalculator({ onAdd }: PricingCalculatorProps) {
   const getPayload = () => {
     const length = formData.dimensions.length_mm || 0;
     const computedCabida = length > 0 ? Math.max(1, Math.floor(2000 / length)) : 1;
+    
+    if (showAdvanced) {
+      return {
+        ...formData,
+        cabida: computedCabida,
+        logistics: {
+          ...formData.logistics,
+          manual_freight_cost: forceManualFreight ? (parseFloat(manualFreightCost) || 0) : null
+        }
+      };
+    }
+
+    // Auto-calculate glue gms and layers for payload
+    const thickness = formData.dimensions.thickness_mm || 5.0;
+    let glue_gms = 0;
+    if (thickness <= 1.8) glue_gms = 55;
+    else if (thickness <= 2.9) glue_gms = 65;
+    else if (thickness <= 5.0) glue_gms = 70;
+    else if (thickness <= 7.5) glue_gms = 80;
+    else if (thickness <= 12.0) glue_gms = 100;
+    else glue_gms = 120;
+
+    const glue_layers = Math.max(1, formData.bom.layers.length - 1);
+
     return {
       ...formData,
       cabida: computedCabida,
+      waste_pct: 0.0, // Clear manual waste pct in auto mode so backend uses fixed waste tubes
+      bom: {
+        ...formData.bom,
+        glue_gms: formData.bom.glue_name ? glue_gms : 0,
+        glue_layers: formData.bom.glue_name ? glue_layers : 0,
+      },
       logistics: {
         ...formData.logistics,
         manual_freight_cost: forceManualFreight ? (parseFloat(manualFreightCost) || 0) : null
@@ -262,47 +295,50 @@ export default function PricingCalculator({ onAdd }: PricingCalculatorProps) {
                 </span>
               </div>
             </div>
+            <div className="col-span-2">
+              <label className="inline-flex items-center text-xs font-bold text-gray-700 cursor-pointer bg-orange-50/50 border border-orange-100 rounded-lg px-3 py-2 hover:bg-orange-50 transition-colors">
+                <input
+                  type="checkbox"
+                  checked={showAdvanced}
+                  onChange={(e) => setShowAdvanced(e.target.checked)}
+                  className="rounded border-orange-300 text-orange-600 focus:ring-orange-500 mr-2 h-4 w-4"
+                />
+                <span className="text-orange-950">Habilitar parámetros manuales (Mermas y consumos avanzados)</span>
+              </label>
+            </div>
             {(formData.product_line === "Tubos" || formData.product_line === "Envases") && (
               <div className="col-span-2">
                 <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2 text-black">Merma y Configuración del Tubo Padre</label>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-[9px] text-gray-500 uppercase font-bold mb-1">Desperdicio Formado (%)</label>
-                    <input
-                      type="number"
-                      step="0.5"
-                      min="0"
-                      value={formData.waste_pct}
-                      onChange={(e) => setFormData({ ...formData, waste_pct: parseFloat(e.target.value) || 0 })}
-                      className="w-full p-2 border border-amber-300 rounded-lg text-sm bg-amber-50 text-black font-semibold"
-                      placeholder="Ej. 50"
-                    />
-                    <p className="text-[9px] text-gray-400 mt-0.5">Factor: ×{(1 + formData.waste_pct / 100).toFixed(2)}</p>
+                    <label className="block text-[9px] text-gray-500 uppercase font-bold mb-1">
+                      {showAdvanced ? "Desperdicio Formado (%)" : "Desperdicio Fijo (Tubo Padre)"}
+                    </label>
+                    {showAdvanced ? (
+                      <input
+                        type="number"
+                        step="0.5"
+                        min="0"
+                        value={formData.waste_pct}
+                        onChange={(e) => setFormData({ ...formData, waste_pct: parseFloat(e.target.value) || 0 })}
+                        className="w-full p-2 border border-orange-300 rounded-lg text-sm bg-orange-50 text-black font-semibold"
+                        placeholder="Ej. 50"
+                      />
+                    ) : (
+                      <div className="w-full p-2 border border-amber-300 rounded-lg text-sm bg-amber-50 text-amber-900 font-bold">
+                        {(formData.dimensions.thickness_mm || 0) <= 6.0 ? 35 : 45} tubos padres <span className="text-[10px] text-gray-500 font-normal">(Automático)</span>
+                      </div>
+                    )}
+                    <p className="text-[9px] text-gray-400 mt-0.5">
+                      {showAdvanced ? `Factor: ×${(1 + formData.waste_pct / 100).toFixed(2)}` : `Seguro por espesor: ${(formData.dimensions.thickness_mm || 0) <= 6.0 ? "<= 6.0 mm (35 u)" : "> 6.0 mm (45 u)"}`}
+                    </p>
                   </div>
                   <div>
-                    <label className="block text-[9px] text-gray-500 uppercase font-bold mb-1">Cabida (cortes por pase)</label>
-                    <div className="w-full p-2 border border-blue-300 rounded-lg text-sm bg-blue-50 text-blue-900 font-bold">
-                      {(() => {
-                        const length = formData.dimensions.length_mm || 0;
-                        const computedCabida = length > 0 ? Math.max(1, Math.floor(2000 / length)) : 1;
-                        return computedCabida;
-                      })()} <span className="text-[10px] text-gray-500 font-normal">(Automático)</span>
+                    <label className="block text-[9px] text-gray-500 uppercase font-bold mb-1">Especificaciones Tubo Padre</label>
+                    <div className="w-full p-2 border border-blue-300 rounded-lg text-xs bg-blue-50 text-blue-900 font-semibold">
+                      D. Ext: {((formData.dimensions.diameter_mm || 0) + 2 * (formData.dimensions.thickness_mm || 0)).toFixed(1)} mm &nbsp;· Largo: {((formData.dimensions.length_mm || 0) + 10).toFixed(0)} mm
                     </div>
-                    <p className="text-[9px] text-gray-400 mt-0.5">
-                      {(() => {
-                        const length = formData.dimensions.length_mm || 0;
-                        const computedCabida = length > 0 ? Math.max(1, Math.floor(2000 / length)) : 1;
-                        const refile = computedCabida <= 1
-                          ? formData.margen_puntas_mm
-                          : formData.margen_puntas_mm + (computedCabida - 1) * formData.grosor_cuchilla_corte_mm;
-                        const largoPadre = length * computedCabida + refile;
-                        return (
-                          <>
-                            Refile auto: {refile} mm &nbsp;· L. padre = {largoPadre.toFixed(0)} mm
-                          </>
-                        );
-                      })()}
-                    </p>
+                    <p className="text-[9px] text-gray-400 mt-0.5">Refile fijo: +10 mm</p>
                   </div>
                 </div>
               </div>
@@ -316,39 +352,39 @@ export default function PricingCalculator({ onAdd }: PricingCalculatorProps) {
           <div className="grid grid-cols-4 gap-4">
             <div>
               <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1 text-black">Largo / Alto</label>
-              <input type="number" value={formData.dimensions.length_mm} onChange={(e) => setFormData({ ...formData, dimensions: { ...formData.dimensions, length_mm: parseFloat(e.target.value) } })} className="w-full p-2 border rounded-lg text-sm bg-gray-50 text-black" />
+              <input type="number" value={isNaN(formData.dimensions.length_mm) ? "" : formData.dimensions.length_mm} onChange={(e) => setFormData({ ...formData, dimensions: { ...formData.dimensions, length_mm: parseFloat(e.target.value) } })} className="w-full p-2 border rounded-lg text-sm bg-gray-50 text-black" />
             </div>
             {formData.product_line === "Corrugado" ? (
               <>
                 <div>
                   <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1 text-black">Ancho</label>
-                  <input type="number" value={formData.dimensions.width_mm} onChange={(e) => setFormData({ ...formData, dimensions: { ...formData.dimensions, width_mm: parseFloat(e.target.value) } })} className="w-full p-2 border rounded-lg text-sm bg-gray-50 text-black" />
+                  <input type="number" value={isNaN(formData.dimensions.width_mm) ? "" : formData.dimensions.width_mm} onChange={(e) => setFormData({ ...formData, dimensions: { ...formData.dimensions, width_mm: parseFloat(e.target.value) } })} className="w-full p-2 border rounded-lg text-sm bg-gray-50 text-black" />
                 </div>
                 <div>
                   <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1 text-black">Alto</label>
-                  <input type="number" value={formData.dimensions.height_mm} onChange={(e) => setFormData({ ...formData, dimensions: { ...formData.dimensions, height_mm: parseFloat(e.target.value) } })} className="w-full p-2 border rounded-lg text-sm bg-gray-50 text-black" />
+                  <input type="number" value={isNaN(formData.dimensions.height_mm) ? "" : formData.dimensions.height_mm} onChange={(e) => setFormData({ ...formData, dimensions: { ...formData.dimensions, height_mm: parseFloat(e.target.value) } })} className="w-full p-2 border rounded-lg text-sm bg-gray-50 text-black" />
                 </div>
               </>
             ) : formData.product_line === "Esquineros" ? (
               <>
                 <div>
                   <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1 text-black">Ala (mm)</label>
-                  <input type="number" value={formData.dimensions.wing_1_mm} onChange={(e) => setFormData({ ...formData, dimensions: { ...formData.dimensions, wing_1_mm: parseFloat(e.target.value), wing_2_mm: parseFloat(e.target.value) } })} className="w-full p-2 border rounded-lg text-sm bg-gray-50 text-black" />
+                  <input type="number" value={isNaN(formData.dimensions.wing_1_mm) ? "" : formData.dimensions.wing_1_mm} onChange={(e) => setFormData({ ...formData, dimensions: { ...formData.dimensions, wing_1_mm: parseFloat(e.target.value), wing_2_mm: parseFloat(e.target.value) } })} className="w-full p-2 border rounded-lg text-sm bg-gray-50 text-black" />
                 </div>
                 <div>
                   <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1 text-black">Espesor</label>
-                  <input type="number" value={formData.dimensions.thickness_mm} onChange={(e) => setFormData({ ...formData, dimensions: { ...formData.dimensions, thickness_mm: parseFloat(e.target.value) } })} className="w-full p-2 border rounded-lg text-sm bg-gray-50 text-black" />
+                  <input type="number" value={isNaN(formData.dimensions.thickness_mm) ? "" : formData.dimensions.thickness_mm} onChange={(e) => setFormData({ ...formData, dimensions: { ...formData.dimensions, thickness_mm: parseFloat(e.target.value) } })} className="w-full p-2 border rounded-lg text-sm bg-gray-50 text-black" />
                 </div>
               </>
             ) : (
               <>
                 <div>
                   <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1 text-black">Diámetro Int.</label>
-                  <input type="number" value={formData.dimensions.diameter_mm} onChange={(e) => setFormData({ ...formData, dimensions: { ...formData.dimensions, diameter_mm: parseFloat(e.target.value) } })} className="w-full p-2 border rounded-lg text-sm bg-gray-50 text-black" />
+                  <input type="number" value={isNaN(formData.dimensions.diameter_mm) ? "" : formData.dimensions.diameter_mm} onChange={(e) => setFormData({ ...formData, dimensions: { ...formData.dimensions, diameter_mm: parseFloat(e.target.value) } })} className="w-full p-2 border rounded-lg text-sm bg-gray-50 text-black" />
                 </div>
                 <div>
                   <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1 text-black">Pared (Espesor)</label>
-                  <input type="number" value={formData.dimensions.thickness_mm} onChange={(e) => setFormData({ ...formData, dimensions: { ...formData.dimensions, thickness_mm: parseFloat(e.target.value) } })} className="w-full p-2 border rounded-lg text-sm bg-gray-50 text-black" />
+                  <input type="number" value={isNaN(formData.dimensions.thickness_mm) ? "" : formData.dimensions.thickness_mm} onChange={(e) => setFormData({ ...formData, dimensions: { ...formData.dimensions, thickness_mm: parseFloat(e.target.value) } })} className="w-full p-2 border rounded-lg text-sm bg-gray-50 text-black" />
                 </div>
               </>
             )}
@@ -423,33 +459,56 @@ export default function PricingCalculator({ onAdd }: PricingCalculatorProps) {
                   </select>
                 </div>
                 {formData.bom.glue_name && (
-                  <>
-                    <div>
-                      <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1 text-black">Consumo (GMS / m²)</label>
-                      <input
-                        type="number"
-                        step="1"
-                        min="0"
-                        value={formData.bom.glue_gms}
-                        onChange={(e) => setFormData({ ...formData, bom: { ...formData.bom, glue_gms: parseFloat(e.target.value) || 0 } })}
-                        className="w-full p-2 border rounded-lg text-sm bg-gray-50 text-black"
-                        placeholder="Ej. 70"
-                      />
+                  showAdvanced ? (
+                    <>
+                      <div>
+                        <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1 text-black">Consumo (GMS / m²)</label>
+                        <input
+                          type="number"
+                          step="1"
+                          min="0"
+                          value={formData.bom.glue_gms}
+                          onChange={(e) => setFormData({ ...formData, bom: { ...formData.bom, glue_gms: parseFloat(e.target.value) || 0 } })}
+                          className="w-full p-2 border rounded-lg text-sm bg-gray-50 text-black font-semibold"
+                          placeholder="Ej. 70"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1 text-black">Capas de Pegante</label>
+                        <input
+                          type="number"
+                          min="0"
+                          step="1"
+                          value={formData.bom.glue_layers}
+                          onChange={(e) => setFormData({ ...formData, bom: { ...formData.bom, glue_layers: parseInt(e.target.value) || 0 } })}
+                          className="w-full p-2 border rounded-lg text-sm bg-gray-50 text-black font-semibold"
+                        />
+                      </div>
+                    </>
+                  ) : (
+                    <div className="col-span-2 bg-gray-50 border border-gray-100 rounded-lg p-3 grid grid-cols-2 gap-3 text-xs">
+                      <div>
+                        <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-0.5 text-black">Consumo Pegante</span>
+                        <span className="font-bold text-gray-700">
+                          {(() => {
+                            const thickness = formData.dimensions.thickness_mm || 5.0;
+                            if (thickness <= 1.8) return 55;
+                            if (thickness <= 2.9) return 65;
+                            if (thickness <= 5.0) return 70;
+                            if (thickness <= 7.5) return 80;
+                            if (thickness <= 12.0) return 100;
+                            return 120;
+                          })()} gr/m² <span className="text-gray-400 font-normal">(Asignado)</span>
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-0.5 text-black">Capas de Pegante</span>
+                        <span className="font-bold text-gray-700">
+                          {Math.max(1, formData.bom.layers.length - 1)} capas <span className="text-gray-400 font-normal">(Auto)</span>
+                        </span>
+                      </div>
                     </div>
-                    <div className="col-span-2">
-                      <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1 text-black">
-                        Capas de Pegante <span className="text-gray-400 font-normal">(auto: capas papel - 1)</span>
-                      </label>
-                      <input
-                        type="number"
-                        min="0"
-                        step="1"
-                        value={formData.bom.glue_layers}
-                        onChange={(e) => setFormData({ ...formData, bom: { ...formData.bom, glue_layers: parseInt(e.target.value) || 0 } })}
-                        className="w-full p-2 border rounded-lg text-sm bg-gray-50 text-black"
-                      />
-                    </div>
-                  </>
+                  )
                 )}
               </div>
             </div>
@@ -840,8 +899,13 @@ export default function PricingCalculator({ onAdd }: PricingCalculatorProps) {
                         <span className="text-gray-300">${result.income_statement.carga_fabril_cif.toLocaleString()}</span>
                       </div>
 
+                      <div className="p-3 flex justify-between items-center bg-gray-800/30 font-semibold text-gray-200">
+                        <span>(=) Gastos Operacionales (MOD + CIF)</span>
+                        <span className="text-orange-400">${(result.income_statement.mano_de_obra + result.income_statement.carga_fabril_cif).toLocaleString()}</span>
+                      </div>
+
                       <div className="p-3 flex justify-between items-center">
-                        <span className="text-gray-400">(-) Gastos Administrativos & Distribución (NIF + Flete)</span>
+                        <span className="text-gray-400">(-) Otros Gastos (NIF + Flete)</span>
                         <span className="text-gray-300">${result.income_statement.gastos_operacionales.toLocaleString()}</span>
                       </div>
 
